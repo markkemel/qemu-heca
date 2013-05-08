@@ -25,9 +25,9 @@
 #include <inttypes.h>
 
 #include "cpu.h"
-#include "disas.h"
+#include "disas/disas.h"
 #include "tcg-op.h"
-#include "qemu-log.h"
+#include "qemu/log.h"
 
 #include "helper.h"
 #define GEN_HELPER 1
@@ -98,7 +98,7 @@ static TCGv_i32 cpu_exclusive_info;
 static TCGv cpu_F0s, cpu_F1s;
 static TCGv_i64 cpu_F0d, cpu_F1d;
 
-#include "gen-icount.h"
+#include "exec/gen-icount.h"
 
 static const char *regnames[] =
     { "r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7",
@@ -462,8 +462,15 @@ static void gen_sar(TCGv dest, TCGv t0, TCGv t1)
     tcg_temp_free_i32(tmp1);
 }
 
-/* FIXME:  Implement this natively.  */
-#define tcg_gen_abs_i32(t0, t1) gen_helper_abs(t0, t1)
+static void tcg_gen_abs_i32(TCGv dest, TCGv src)
+{
+    TCGv c0 = tcg_const_i32(0);
+    TCGv tmp = tcg_temp_new_i32();
+    tcg_gen_neg_i32(tmp, src);
+    tcg_gen_movcond_i32(TCG_COND_GT, dest, src, c0, src, tmp);
+    tcg_temp_free_i32(c0);
+    tcg_temp_free_i32(tmp);
+}
 
 static void shifter_out_im(TCGv var, int shift)
 {
@@ -516,10 +523,10 @@ static inline void gen_arm_shift_im(TCGv var, int shiftop, int shift, int flags)
             tcg_gen_rotri_i32(var, var, shift); break;
         } else {
             TCGv tmp = tcg_temp_new_i32();
+            tcg_gen_shli_i32(tmp, cpu_CF, 31);
             if (flags)
                 shifter_out_im(var, 0);
             tcg_gen_shri_i32(var, var, 1);
-            tcg_gen_shli_i32(tmp, cpu_CF, 31);
             tcg_gen_or_i32(var, var, tmp);
             tcg_temp_free_i32(tmp);
         }
@@ -2730,7 +2737,6 @@ static int disas_vfp_insn(CPUARMState * env, DisasContext *s, uint32_t insn)
                     }
                 } else {
                     /* arm->vfp */
-                    tmp = load_reg(s, rd);
                     if (insn & (1 << 21)) {
                         rn >>= 1;
                         /* system register */
@@ -2741,6 +2747,7 @@ static int disas_vfp_insn(CPUARMState * env, DisasContext *s, uint32_t insn)
                             /* Writes are ignored.  */
                             break;
                         case ARM_VFP_FPSCR:
+                            tmp = load_reg(s, rd);
                             gen_helper_vfp_set_fpscr(cpu_env, tmp);
                             tcg_temp_free_i32(tmp);
                             gen_lookup_tb(s);
@@ -2750,18 +2757,21 @@ static int disas_vfp_insn(CPUARMState * env, DisasContext *s, uint32_t insn)
                                 return 1;
                             /* TODO: VFP subarchitecture support.
                              * For now, keep the EN bit only */
+                            tmp = load_reg(s, rd);
                             tcg_gen_andi_i32(tmp, tmp, 1 << 30);
                             store_cpu_field(tmp, vfp.xregs[rn]);
                             gen_lookup_tb(s);
                             break;
                         case ARM_VFP_FPINST:
                         case ARM_VFP_FPINST2:
+                            tmp = load_reg(s, rd);
                             store_cpu_field(tmp, vfp.xregs[rn]);
                             break;
                         default:
                             return 1;
                         }
                     } else {
+                        tmp = load_reg(s, rd);
                         gen_vfp_msr(tmp);
                         gen_mov_vreg_F0(0, rn);
                     }
@@ -4184,7 +4194,9 @@ static inline void gen_neon_negl(TCGv_i64 var, int size)
     switch (size) {
     case 0: gen_helper_neon_negl_u16(var, var); break;
     case 1: gen_helper_neon_negl_u32(var, var); break;
-    case 2: gen_helper_neon_negl_u64(var, var); break;
+    case 2:
+        tcg_gen_neg_i64(var, var);
+        break;
     default: abort();
     }
 }
@@ -9718,7 +9730,7 @@ static inline void gen_intermediate_code_internal(CPUARMState *env,
 
     dc->tb = tb;
 
-    gen_opc_end = gen_opc_buf + OPC_MAX_SIZE;
+    gen_opc_end = tcg_ctx.gen_opc_buf + OPC_MAX_SIZE;
 
     dc->is_jmp = DISAS_NEXT;
     dc->pc = pc_start;
@@ -9825,16 +9837,16 @@ static inline void gen_intermediate_code_internal(CPUARMState *env,
             }
         }
         if (search_pc) {
-            j = gen_opc_ptr - gen_opc_buf;
+            j = tcg_ctx.gen_opc_ptr - tcg_ctx.gen_opc_buf;
             if (lj < j) {
                 lj++;
                 while (lj < j)
-                    gen_opc_instr_start[lj++] = 0;
+                    tcg_ctx.gen_opc_instr_start[lj++] = 0;
             }
-            gen_opc_pc[lj] = dc->pc;
+            tcg_ctx.gen_opc_pc[lj] = dc->pc;
             gen_opc_condexec_bits[lj] = (dc->condexec_cond << 4) | (dc->condexec_mask >> 1);
-            gen_opc_instr_start[lj] = 1;
-            gen_opc_icount[lj] = num_insns;
+            tcg_ctx.gen_opc_instr_start[lj] = 1;
+            tcg_ctx.gen_opc_icount[lj] = num_insns;
         }
 
         if (num_insns + 1 == max_insns && (tb->cflags & CF_LAST_IO))
@@ -9872,7 +9884,7 @@ static inline void gen_intermediate_code_internal(CPUARMState *env,
          * Also stop translation when a page boundary is reached.  This
          * ensures prefetch aborts occur at the right place.  */
         num_insns ++;
-    } while (!dc->is_jmp && gen_opc_ptr < gen_opc_end &&
+    } while (!dc->is_jmp && tcg_ctx.gen_opc_ptr < gen_opc_end &&
              !env->singlestep_enabled &&
              !singlestep &&
              dc->pc < next_page_start &&
@@ -9953,22 +9965,22 @@ static inline void gen_intermediate_code_internal(CPUARMState *env,
 
 done_generating:
     gen_icount_end(tb, num_insns);
-    *gen_opc_ptr = INDEX_op_end;
+    *tcg_ctx.gen_opc_ptr = INDEX_op_end;
 
 #ifdef DEBUG_DISAS
     if (qemu_loglevel_mask(CPU_LOG_TB_IN_ASM)) {
         qemu_log("----------------\n");
         qemu_log("IN: %s\n", lookup_symbol(pc_start));
-        log_target_disas(pc_start, dc->pc - pc_start,
+        log_target_disas(env, pc_start, dc->pc - pc_start,
                          dc->thumb | (dc->bswap_code << 1));
         qemu_log("\n");
     }
 #endif
     if (search_pc) {
-        j = gen_opc_ptr - gen_opc_buf;
+        j = tcg_ctx.gen_opc_ptr - tcg_ctx.gen_opc_buf;
         lj++;
         while (lj <= j)
-            gen_opc_instr_start[lj++] = 0;
+            tcg_ctx.gen_opc_instr_start[lj++] = 0;
     } else {
         tb->size = dc->pc - pc_start;
         tb->icount = num_insns;
@@ -10034,6 +10046,6 @@ void cpu_dump_state(CPUARMState *env, FILE *f, fprintf_function cpu_fprintf,
 
 void restore_state_to_opc(CPUARMState *env, TranslationBlock *tb, int pc_pos)
 {
-    env->regs[15] = gen_opc_pc[pc_pos];
+    env->regs[15] = tcg_ctx.gen_opc_pc[pc_pos];
     env->condexec_bits = gen_opc_condexec_bits[pc_pos];
 }

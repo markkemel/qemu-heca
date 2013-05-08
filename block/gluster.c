@@ -16,9 +16,9 @@
  * GNU GPL, version 2 or (at your option) any later version.
  */
 #include <glusterfs/api/glfs.h>
-#include "block_int.h"
-#include "qemu_socket.h"
-#include "uri.h"
+#include "block/block_int.h"
+#include "qemu/sockets.h"
+#include "qemu/uri.h"
 
 typedef struct GlusterAIOCB {
     BlockDriverAIOCB common;
@@ -217,7 +217,7 @@ static struct glfs *qemu_gluster_init(GlusterConf *gconf, const char *filename)
     ret = glfs_init(glfs);
     if (ret) {
         error_report("Gluster connection failed for server=%s port=%d "
-             "volume=%s image=%s transport=%s\n", gconf->server, gconf->port,
+             "volume=%s image=%s transport=%s", gconf->server, gconf->port,
              gconf->volname, gconf->image, gconf->transport);
         goto out;
     }
@@ -388,7 +388,7 @@ static void qemu_gluster_aio_cancel(BlockDriverAIOCB *blockacb)
     }
 }
 
-static AIOPool gluster_aio_pool = {
+static const AIOCBInfo gluster_aiocb_info = {
     .aiocb_size = sizeof(GlusterAIOCB),
     .cancel = qemu_gluster_aio_cancel,
 };
@@ -439,7 +439,7 @@ static BlockDriverAIOCB *qemu_gluster_aio_rw(BlockDriverState *bs,
     size = nb_sectors * BDRV_SECTOR_SIZE;
     s->qemu_aio_count++;
 
-    acb = qemu_aio_get(&gluster_aio_pool, bs, cb, opaque);
+    acb = qemu_aio_get(&gluster_aiocb_info, bs, cb, opaque);
     acb->size = size;
     acb->ret = 0;
     acb->finished = NULL;
@@ -484,7 +484,7 @@ static BlockDriverAIOCB *qemu_gluster_aio_flush(BlockDriverState *bs,
     GlusterAIOCB *acb;
     BDRVGlusterState *s = bs->opaque;
 
-    acb = qemu_aio_get(&gluster_aio_pool, bs, cb, opaque);
+    acb = qemu_aio_get(&gluster_aiocb_info, bs, cb, opaque);
     acb->size = 0;
     acb->ret = 0;
     acb->finished = NULL;

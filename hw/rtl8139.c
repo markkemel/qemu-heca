@@ -52,13 +52,13 @@
 #include <zlib.h>
 
 #include "hw.h"
-#include "pci.h"
-#include "dma.h"
-#include "qemu-timer.h"
-#include "net.h"
+#include "pci/pci.h"
+#include "sysemu/dma.h"
+#include "qemu/timer.h"
+#include "net/net.h"
 #include "loader.h"
-#include "sysemu.h"
-#include "iov.h"
+#include "sysemu/sysemu.h"
+#include "qemu/iov.h"
 
 /* debug RTL8139 card */
 //#define DEBUG_RTL8139 1
@@ -167,7 +167,7 @@ enum IntrStatusBits {
     PCIErr = 0x8000,
     PCSTimeout = 0x4000,
     RxFIFOOver = 0x40,
-    RxUnderrun = 0x20,
+    RxUnderrun = 0x20, /* Packet Underrun / Link Change */
     RxOverflow = 0x10,
     TxErr = 0x08,
     TxOK = 0x04,
@@ -786,7 +786,7 @@ static bool rtl8139_cp_rx_valid(RTL8139State *s)
 
 static int rtl8139_can_receive(NetClientState *nc)
 {
-    RTL8139State *s = DO_UPCAST(NICState, nc, nc)->opaque;
+    RTL8139State *s = qemu_get_nic_opaque(nc);
     int avail;
 
     /* Receive (drop) packets if card is disabled.  */
@@ -808,7 +808,7 @@ static int rtl8139_can_receive(NetClientState *nc)
 
 static ssize_t rtl8139_do_receive(NetClientState *nc, const uint8_t *buf, size_t size_, int do_interrupt)
 {
-    RTL8139State *s = DO_UPCAST(NICState, nc, nc)->opaque;
+    RTL8139State *s = qemu_get_nic_opaque(nc);
     /* size is the length of the buffer passed to the driver */
     int size = size_;
     const uint8_t *dot1q_buf = NULL;
@@ -1258,7 +1258,8 @@ static void rtl8139_reset(DeviceState *d)
     s->BasicModeStatus  = 0x7809;
     //s->BasicModeStatus |= 0x0040; /* UTP medium */
     s->BasicModeStatus |= 0x0020; /* autonegotiation completed */
-    s->BasicModeStatus |= 0x0004; /* link is up */
+    /* preserve link state */
+    s->BasicModeStatus |= qemu_get_queue(s->nic)->link_down ? 0 : 0x04;
 
     s->NWayAdvert    = 0x05e1; /* all modes, full duplex */
     s->NWayLPAR      = 0x05e1; /* all modes, full duplex */
@@ -1786,7 +1787,7 @@ static void rtl8139_transfer_frame(RTL8139State *s, uint8_t *buf, int size,
         }
 
         DPRINTF("+++ transmit loopback mode\n");
-        rtl8139_do_receive(&s->nic->nc, buf, size, do_interrupt);
+        rtl8139_do_receive(qemu_get_queue(s->nic), buf, size, do_interrupt);
 
         if (iov) {
             g_free(buf2);
@@ -1795,9 +1796,9 @@ static void rtl8139_transfer_frame(RTL8139State *s, uint8_t *buf, int size,
     else
     {
         if (iov) {
-            qemu_sendv_packet(&s->nic->nc, iov, 3);
+            qemu_sendv_packet(qemu_get_queue(s->nic), iov, 3);
         } else {
-            qemu_send_packet(&s->nic->nc, buf, size);
+            qemu_send_packet(qemu_get_queue(s->nic), buf, size);
         }
     }
 }
@@ -2455,7 +2456,7 @@ static void rtl8139_TxStatus_write(RTL8139State *s, uint32_t txRegOffset, uint32
 
         if (descriptor == 0 && (val & 0x8))
         {
-            target_phys_addr_t tc_addr = rtl8139_addr64(s->TxStatus[0] & ~0x3f, s->TxStatus[1]);
+            hwaddr tc_addr = rtl8139_addr64(s->TxStatus[0] & ~0x3f, s->TxStatus[1]);
 
             /* dump tally counters to specified memory location */
             RTL8139TallyCounters_dma_write(s, tc_addr);
@@ -3003,7 +3004,8 @@ static uint32_t rtl8139_io_readb(void *opaque, uint8_t addr)
             break;
 
         case MediaStatus:
-            ret = 0xd0;
+            /* The LinkDown bit of MediaStatus is inverse with link status */
+            ret = 0xd0 | (~s->BasicModeStatus & 0x04);
             DPRINTF("MediaStatus read 0x%x\n", ret);
             break;
 
@@ -3186,65 +3188,33 @@ static uint32_t rtl8139_io_readl(void *opaque, uint8_t addr)
 
 /* */
 
-static void rtl8139_ioport_writeb(void *opaque, uint32_t addr, uint32_t val)
+static void rtl8139_mmio_writeb(void *opaque, hwaddr addr, uint32_t val)
 {
     rtl8139_io_writeb(opaque, addr & 0xFF, val);
 }
 
-static void rtl8139_ioport_writew(void *opaque, uint32_t addr, uint32_t val)
+static void rtl8139_mmio_writew(void *opaque, hwaddr addr, uint32_t val)
 {
     rtl8139_io_writew(opaque, addr & 0xFF, val);
 }
 
-static void rtl8139_ioport_writel(void *opaque, uint32_t addr, uint32_t val)
+static void rtl8139_mmio_writel(void *opaque, hwaddr addr, uint32_t val)
 {
     rtl8139_io_writel(opaque, addr & 0xFF, val);
 }
 
-static uint32_t rtl8139_ioport_readb(void *opaque, uint32_t addr)
+static uint32_t rtl8139_mmio_readb(void *opaque, hwaddr addr)
 {
     return rtl8139_io_readb(opaque, addr & 0xFF);
 }
 
-static uint32_t rtl8139_ioport_readw(void *opaque, uint32_t addr)
-{
-    return rtl8139_io_readw(opaque, addr & 0xFF);
-}
-
-static uint32_t rtl8139_ioport_readl(void *opaque, uint32_t addr)
-{
-    return rtl8139_io_readl(opaque, addr & 0xFF);
-}
-
-/* */
-
-static void rtl8139_mmio_writeb(void *opaque, target_phys_addr_t addr, uint32_t val)
-{
-    rtl8139_io_writeb(opaque, addr & 0xFF, val);
-}
-
-static void rtl8139_mmio_writew(void *opaque, target_phys_addr_t addr, uint32_t val)
-{
-    rtl8139_io_writew(opaque, addr & 0xFF, val);
-}
-
-static void rtl8139_mmio_writel(void *opaque, target_phys_addr_t addr, uint32_t val)
-{
-    rtl8139_io_writel(opaque, addr & 0xFF, val);
-}
-
-static uint32_t rtl8139_mmio_readb(void *opaque, target_phys_addr_t addr)
-{
-    return rtl8139_io_readb(opaque, addr & 0xFF);
-}
-
-static uint32_t rtl8139_mmio_readw(void *opaque, target_phys_addr_t addr)
+static uint32_t rtl8139_mmio_readw(void *opaque, hwaddr addr)
 {
     uint32_t val = rtl8139_io_readw(opaque, addr & 0xFF);
     return val;
 }
 
-static uint32_t rtl8139_mmio_readl(void *opaque, target_phys_addr_t addr)
+static uint32_t rtl8139_mmio_readl(void *opaque, hwaddr addr)
 {
     uint32_t val = rtl8139_io_readl(opaque, addr & 0xFF);
     return val;
@@ -3257,6 +3227,10 @@ static int rtl8139_post_load(void *opaque, int version_id)
     if (version_id < 4) {
         s->cplus_enabled = s->CpCmd != 0;
     }
+
+    /* nc.link_down can't be migrated, so infer link_down according
+     * to link status bit in BasicModeStatus */
+    qemu_get_queue(s->nic)->link_down = (s->BasicModeStatus & 0x04) == 0;
 
     return 0;
 }
@@ -3381,18 +3355,44 @@ static const VMStateDescription vmstate_rtl8139 = {
 /***********************************************************/
 /* PCI RTL8139 definitions */
 
-static const MemoryRegionPortio rtl8139_portio[] = {
-    { 0, 0x100, 1, .read = rtl8139_ioport_readb, },
-    { 0, 0x100, 1, .write = rtl8139_ioport_writeb, },
-    { 0, 0x100, 2, .read = rtl8139_ioport_readw, },
-    { 0, 0x100, 2, .write = rtl8139_ioport_writew, },
-    { 0, 0x100, 4, .read = rtl8139_ioport_readl, },
-    { 0, 0x100, 4, .write = rtl8139_ioport_writel, },
-    PORTIO_END_OF_LIST()
-};
+static void rtl8139_ioport_write(void *opaque, hwaddr addr,
+                                 uint64_t val, unsigned size)
+{
+    switch (size) {
+    case 1:
+        rtl8139_io_writeb(opaque, addr, val);
+        break;
+    case 2:
+        rtl8139_io_writew(opaque, addr, val);
+        break;
+    case 4:
+        rtl8139_io_writel(opaque, addr, val);
+        break;
+    }
+}
+
+static uint64_t rtl8139_ioport_read(void *opaque, hwaddr addr,
+                                    unsigned size)
+{
+    switch (size) {
+    case 1:
+        return rtl8139_io_readb(opaque, addr);
+    case 2:
+        return rtl8139_io_readw(opaque, addr);
+    case 4:
+        return rtl8139_io_readl(opaque, addr);
+    }
+
+    return -1;
+}
 
 static const MemoryRegionOps rtl8139_io_ops = {
-    .old_portio = rtl8139_portio,
+    .read = rtl8139_ioport_read,
+    .write = rtl8139_ioport_write,
+    .impl = {
+        .min_access_size = 1,
+        .max_access_size = 4,
+    },
     .endianness = DEVICE_LITTLE_ENDIAN,
 };
 
@@ -3429,7 +3429,7 @@ static void rtl8139_timer(void *opaque)
 
 static void rtl8139_cleanup(NetClientState *nc)
 {
-    RTL8139State *s = DO_UPCAST(NICState, nc, nc)->opaque;
+    RTL8139State *s = qemu_get_nic_opaque(nc);
 
     s->nic = NULL;
 }
@@ -3446,7 +3446,21 @@ static void pci_rtl8139_uninit(PCIDevice *dev)
     }
     qemu_del_timer(s->timer);
     qemu_free_timer(s->timer);
-    qemu_del_net_client(&s->nic->nc);
+    qemu_del_nic(s->nic);
+}
+
+static void rtl8139_set_link_status(NetClientState *nc)
+{
+    RTL8139State *s = qemu_get_nic_opaque(nc);
+
+    if (nc->link_down) {
+        s->BasicModeStatus &= ~0x04;
+    } else {
+        s->BasicModeStatus |= 0x04;
+    }
+
+    s->IntrStatus |= RxUnderrun;
+    rtl8139_update_irq(s);
 }
 
 static NetClientInfo net_rtl8139_info = {
@@ -3455,6 +3469,7 @@ static NetClientInfo net_rtl8139_info = {
     .can_receive = rtl8139_can_receive,
     .receive = rtl8139_receive,
     .cleanup = rtl8139_cleanup,
+    .link_status_changed = rtl8139_set_link_status,
 };
 
 static int pci_rtl8139_init(PCIDevice *dev)
@@ -3488,7 +3503,7 @@ static int pci_rtl8139_init(PCIDevice *dev)
 
     s->nic = qemu_new_nic(&net_rtl8139_info, &s->conf,
                           object_get_typename(OBJECT(dev)), dev->qdev.id, s);
-    qemu_format_nic_info_str(&s->nic->nc, s->conf.macaddr.a);
+    qemu_format_nic_info_str(qemu_get_queue(s->nic), s->conf.macaddr.a);
 
     s->cplus_txbuffer = NULL;
     s->cplus_txbuffer_len = 0;
@@ -3525,7 +3540,7 @@ static void rtl8139_class_init(ObjectClass *klass, void *data)
     dc->props = rtl8139_properties;
 }
 
-static TypeInfo rtl8139_info = {
+static const TypeInfo rtl8139_info = {
     .name          = "rtl8139",
     .parent        = TYPE_PCI_DEVICE,
     .instance_size = sizeof(RTL8139State),

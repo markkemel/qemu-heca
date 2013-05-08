@@ -33,8 +33,8 @@
 
 #include "hw.h"
 #include "sysbus.h"
-#include "net.h"
-#include "sysemu.h"
+#include "net/net.h"
+#include "sysemu/sysemu.h"
 #include "trace.h"
 
 /* RECSMALL is not used because it breaks tap networking in linux:
@@ -313,7 +313,7 @@ static void open_eth_int_source_write(OpenEthState *s,
 
 static void open_eth_set_link_status(NetClientState *nc)
 {
-    OpenEthState *s = DO_UPCAST(NICState, nc, nc)->opaque;
+    OpenEthState *s = qemu_get_nic_opaque(nc);
 
     if (GET_REGBIT(s, MIICOMMAND, SCANSTAT)) {
         SET_REGFIELD(s, MIISTATUS, LINKFAIL, nc->link_down);
@@ -339,12 +339,12 @@ static void open_eth_reset(void *opaque)
     s->rx_desc = 0x40;
 
     mii_reset(&s->mii);
-    open_eth_set_link_status(&s->nic->nc);
+    open_eth_set_link_status(qemu_get_queue(s->nic));
 }
 
 static int open_eth_can_receive(NetClientState *nc)
 {
-    OpenEthState *s = DO_UPCAST(NICState, nc, nc)->opaque;
+    OpenEthState *s = qemu_get_nic_opaque(nc);
 
     return GET_REGBIT(s, MODER, RXEN) &&
         (s->regs[TX_BD_NUM] < 0x80) &&
@@ -354,7 +354,7 @@ static int open_eth_can_receive(NetClientState *nc)
 static ssize_t open_eth_receive(NetClientState *nc,
         const uint8_t *buf, size_t size)
 {
-    OpenEthState *s = DO_UPCAST(NICState, nc, nc)->opaque;
+    OpenEthState *s = qemu_get_nic_opaque(nc);
     size_t maxfl = GET_REGFIELD(s, PACKETLEN, MAXFL);
     size_t minfl = GET_REGFIELD(s, PACKETLEN, MINFL);
     size_t fcsl = 4;
@@ -499,7 +499,7 @@ static void open_eth_start_xmit(OpenEthState *s, desc *tx)
     if (tx_len > len) {
         memset(buf + len, 0, tx_len - len);
     }
-    qemu_send_packet(&s->nic->nc, buf, tx_len);
+    qemu_send_packet(qemu_get_queue(s->nic), buf, tx_len);
 
     if (tx->len_flags & TXD_WR) {
         s->tx_desc = 0;
@@ -528,7 +528,7 @@ static void open_eth_check_start_xmit(OpenEthState *s)
 }
 
 static uint64_t open_eth_reg_read(void *opaque,
-        target_phys_addr_t addr, unsigned int size)
+        hwaddr addr, unsigned int size)
 {
     static uint32_t (*reg_read[REG_MAX])(OpenEthState *s) = {
     };
@@ -606,7 +606,7 @@ static void open_eth_mii_command_host_write(OpenEthState *s, uint32_t val)
         } else {
             s->regs[MIIRX_DATA] = 0xffff;
         }
-        SET_REGFIELD(s, MIISTATUS, LINKFAIL, s->nic->nc.link_down);
+        SET_REGFIELD(s, MIISTATUS, LINKFAIL, qemu_get_queue(s->nic)->link_down);
     }
 }
 
@@ -620,7 +620,7 @@ static void open_eth_mii_tx_host_write(OpenEthState *s, uint32_t val)
 }
 
 static void open_eth_reg_write(void *opaque,
-        target_phys_addr_t addr, uint64_t val, unsigned int size)
+        hwaddr addr, uint64_t val, unsigned int size)
 {
     static void (*reg_write[REG_MAX])(OpenEthState *s, uint32_t val) = {
         [MODER] = open_eth_moder_host_write,
@@ -644,7 +644,7 @@ static void open_eth_reg_write(void *opaque,
 }
 
 static uint64_t open_eth_desc_read(void *opaque,
-        target_phys_addr_t addr, unsigned int size)
+        hwaddr addr, unsigned int size)
 {
     OpenEthState *s = opaque;
     uint64_t v = 0;
@@ -656,7 +656,7 @@ static uint64_t open_eth_desc_read(void *opaque,
 }
 
 static void open_eth_desc_write(void *opaque,
-        target_phys_addr_t addr, uint64_t val, unsigned int size)
+        hwaddr addr, uint64_t val, unsigned int size)
 {
     OpenEthState *s = opaque;
 
@@ -718,7 +718,7 @@ static void open_eth_class_init(ObjectClass *klass, void *data)
     dc->props = open_eth_properties;
 }
 
-static TypeInfo open_eth_info = {
+static const TypeInfo open_eth_info = {
     .name          = "open_eth",
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(OpenEthState),

@@ -1,24 +1,26 @@
 #if !defined(__HW_SPAPR_H__)
 #define __HW_SPAPR_H__
 
-#include "dma.h"
+#include "sysemu/dma.h"
 #include "hw/xics.h"
 
 struct VIOsPAPRBus;
 struct sPAPRPHBState;
+struct sPAPRNVRAM;
 struct icp_state;
 
 typedef struct sPAPREnvironment {
     struct VIOsPAPRBus *vio_bus;
     QLIST_HEAD(, sPAPRPHBState) phbs;
+    struct sPAPRNVRAM *nvram;
     struct icp_state *icp;
 
-    target_phys_addr_t ram_limit;
+    hwaddr ram_limit;
     void *htab;
     long htab_shift;
-    target_phys_addr_t rma_size;
+    hwaddr rma_size;
     int vrma_adjust;
-    target_phys_addr_t fdt_addr, rtas_addr;
+    hwaddr fdt_addr, rtas_addr;
     long rtas_size;
     void *fdt_skel;
     target_ulong entry_point;
@@ -26,6 +28,9 @@ typedef struct sPAPREnvironment {
     int rtc_offset;
     char *cpu_model;
     bool has_graphics;
+
+    uint32_t epow_irq;
+    Notifier epow_notifier;
 } sPAPREnvironment;
 
 #define H_SUCCESS         0
@@ -283,12 +288,12 @@ extern sPAPREnvironment *spapr;
     do { } while (0)
 #endif
 
-typedef target_ulong (*spapr_hcall_fn)(CPUPPCState *env, sPAPREnvironment *spapr,
+typedef target_ulong (*spapr_hcall_fn)(PowerPCCPU *cpu, sPAPREnvironment *spapr,
                                        target_ulong opcode,
                                        target_ulong *args);
 
 void spapr_register_hypercall(target_ulong opcode, spapr_hcall_fn fn);
-target_ulong spapr_hypercall(CPUPPCState *env, target_ulong opcode,
+target_ulong spapr_hypercall(PowerPCCPU *cpu, target_ulong opcode,
                              target_ulong *args);
 
 int spapr_allocate_irq(int hint, bool lsi);
@@ -317,12 +322,12 @@ static inline void rtas_st(target_ulong phys, int n, uint32_t val)
 typedef void (*spapr_rtas_fn)(sPAPREnvironment *spapr, uint32_t token,
                               uint32_t nargs, target_ulong args,
                               uint32_t nret, target_ulong rets);
-void spapr_rtas_register(const char *name, spapr_rtas_fn fn);
+int spapr_rtas_register(const char *name, spapr_rtas_fn fn);
 target_ulong spapr_rtas_call(sPAPREnvironment *spapr,
                              uint32_t token, uint32_t nargs, target_ulong args,
                              uint32_t nret, target_ulong rets);
-int spapr_rtas_device_tree_setup(void *fdt, target_phys_addr_t rtas_addr,
-                                 target_phys_addr_t rtas_size);
+int spapr_rtas_device_tree_setup(void *fdt, hwaddr rtas_addr,
+                                 hwaddr rtas_size);
 
 #define SPAPR_TCE_PAGE_SHIFT   12
 #define SPAPR_TCE_PAGE_SIZE    (1ULL << SPAPR_TCE_PAGE_SHIFT)
@@ -335,7 +340,12 @@ typedef struct sPAPRTCE {
 #define SPAPR_VIO_BASE_LIOBN    0x00000000
 #define SPAPR_PCI_BASE_LIOBN    0x80000000
 
+#define RTAS_ERROR_LOG_MAX      2048
+
+
 void spapr_iommu_init(void);
+void spapr_events_init(sPAPREnvironment *spapr);
+void spapr_events_fdt_skel(void *fdt, uint32_t epow_irq);
 DMAContext *spapr_tce_new_dma_context(uint32_t liobn, size_t window_size);
 void spapr_tce_free(DMAContext *dma);
 void spapr_tce_reset(DMAContext *dma);

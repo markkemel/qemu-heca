@@ -174,7 +174,7 @@ void exynos4210_combiner_get_gpioin(Exynos4210Irq *irqs, DeviceState *dev,
 }
 
 static uint64_t
-exynos4210_combiner_read(void *opaque, target_phys_addr_t offset, unsigned size)
+exynos4210_combiner_read(void *opaque, hwaddr offset, unsigned size)
 {
     struct Exynos4210CombinerState *s =
             (struct Exynos4210CombinerState *)opaque;
@@ -266,7 +266,7 @@ static void exynos4210_combiner_update(void *opaque, uint8_t group_n)
     }
 }
 
-static void exynos4210_combiner_write(void *opaque, target_phys_addr_t offset,
+static void exynos4210_combiner_write(void *opaque, hwaddr offset,
         uint64_t val, unsigned size)
 {
     struct Exynos4210CombinerState *s =
@@ -440,7 +440,7 @@ static void exynos4210_combiner_class_init(ObjectClass *klass, void *data)
     dc->vmsd = &vmstate_exynos4210_combiner;
 }
 
-static TypeInfo exynos4210_combiner_info = {
+static const TypeInfo exynos4210_combiner_info = {
     .name          = "exynos4210.combiner",
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(Exynos4210CombinerState),

@@ -131,7 +131,7 @@ static void omap_i2c_fifo_run(OMAPI2CState *s)
 static void omap_i2c_reset(DeviceState *dev)
 {
     OMAPI2CState *s = FROM_SYSBUS(OMAPI2CState,
-                                  sysbus_from_qdev(dev));
+                                  SYS_BUS_DEVICE(dev));
     s->mask = 0;
     s->stat = 0;
     s->dma = 0;
@@ -149,7 +149,7 @@ static void omap_i2c_reset(DeviceState *dev)
     s->test = 0;
 }
 
-static uint32_t omap_i2c_read(void *opaque, target_phys_addr_t addr)
+static uint32_t omap_i2c_read(void *opaque, hwaddr addr)
 {
     OMAPI2CState *s = opaque;
     int offset = addr & OMAP_MPUI_REG_MASK;
@@ -248,7 +248,7 @@ static uint32_t omap_i2c_read(void *opaque, target_phys_addr_t addr)
     return 0;
 }
 
-static void omap_i2c_write(void *opaque, target_phys_addr_t addr,
+static void omap_i2c_write(void *opaque, hwaddr addr,
                 uint32_t value)
 {
     OMAPI2CState *s = opaque;
@@ -390,7 +390,7 @@ static void omap_i2c_write(void *opaque, target_phys_addr_t addr,
     }
 }
 
-static void omap_i2c_writeb(void *opaque, target_phys_addr_t addr,
+static void omap_i2c_writeb(void *opaque, hwaddr addr,
                 uint32_t value)
 {
     OMAPI2CState *s = opaque;
@@ -471,7 +471,7 @@ static void omap_i2c_class_init(ObjectClass *klass, void *data)
     dc->reset = omap_i2c_reset;
 }
 
-static TypeInfo omap_i2c_info = {
+static const TypeInfo omap_i2c_info = {
     .name = "omap_i2c",
     .parent = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(OMAPI2CState),
@@ -485,7 +485,7 @@ static void omap_i2c_register_types(void)
 
 i2c_bus *omap_i2c_bus(DeviceState *omap_i2c)
 {
-    OMAPI2CState *s = FROM_SYSBUS(OMAPI2CState, sysbus_from_qdev(omap_i2c));
+    OMAPI2CState *s = FROM_SYSBUS(OMAPI2CState, SYS_BUS_DEVICE(omap_i2c));
     return s->bus;
 }
 

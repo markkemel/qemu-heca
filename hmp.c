@@ -14,12 +14,14 @@
  */
 
 #include "hmp.h"
-#include "net.h"
-#include "qemu-option.h"
-#include "qemu-timer.h"
+#include "net/net.h"
+#include "char/char.h"
+#include "qemu/option.h"
+#include "qemu/timer.h"
 #include "qmp-commands.h"
-#include "monitor.h"
-#include "console.h"
+#include "qemu/sockets.h"
+#include "monitor/monitor.h"
+#include "ui/console.h"
 #include "heca.h"
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -33,7 +35,7 @@ static void hmp_handle_error(Monitor *mon, Error **errp)
     }
 }
 
-void hmp_info_name(Monitor *mon)
+void hmp_info_name(Monitor *mon, const QDict *qdict)
 {
     NameInfo *info;
 
@@ -44,7 +46,7 @@ void hmp_info_name(Monitor *mon)
     qapi_free_NameInfo(info);
 }
 
-void hmp_info_version(Monitor *mon)
+void hmp_info_version(Monitor *mon, const QDict *qdict)
 {
     VersionInfo *info;
 
@@ -57,7 +59,7 @@ void hmp_info_version(Monitor *mon)
     qapi_free_VersionInfo(info);
 }
 
-void hmp_info_kvm(Monitor *mon)
+void hmp_info_kvm(Monitor *mon, const QDict *qdict)
 {
     KvmInfo *info;
 
@@ -72,7 +74,7 @@ void hmp_info_kvm(Monitor *mon)
     qapi_free_KvmInfo(info);
 }
 
-void hmp_info_status(Monitor *mon)
+void hmp_info_status(Monitor *mon, const QDict *qdict)
 {
     StatusInfo *info;
 
@@ -91,7 +93,7 @@ void hmp_info_status(Monitor *mon)
     qapi_free_StatusInfo(info);
 }
 
-void hmp_info_uuid(Monitor *mon)
+void hmp_info_uuid(Monitor *mon, const QDict *qdict)
 {
     UuidInfo *info;
 
@@ -100,7 +102,7 @@ void hmp_info_uuid(Monitor *mon)
     qapi_free_UuidInfo(info);
 }
 
-void hmp_info_chardev(Monitor *mon)
+void hmp_info_chardev(Monitor *mon, const QDict *qdict)
 {
     ChardevInfoList *char_info, *info;
 
@@ -113,7 +115,7 @@ void hmp_info_chardev(Monitor *mon)
     qapi_free_ChardevInfoList(char_info);
 }
 
-void hmp_info_mice(Monitor *mon)
+void hmp_info_mice(Monitor *mon, const QDict *qdict)
 {
     MouseInfoList *mice_list, *mouse;
 
@@ -133,7 +135,7 @@ void hmp_info_mice(Monitor *mon)
     qapi_free_MouseInfoList(mice_list);
 }
 
-void hmp_info_migrate(Monitor *mon)
+void hmp_info_migrate(Monitor *mon, const QDict *qdict)
 {
     MigrationInfo *info;
     MigrationCapabilityStatusList *caps, *cap;
@@ -156,6 +158,14 @@ void hmp_info_migrate(Monitor *mon)
         monitor_printf(mon, "Migration status: %s\n", info->status);
         monitor_printf(mon, "total time: %" PRIu64 " milliseconds\n",
                        info->total_time);
+        if (info->has_expected_downtime) {
+            monitor_printf(mon, "expected downtime: %" PRIu64 " milliseconds\n",
+                           info->expected_downtime);
+        }
+        if (info->has_downtime) {
+            monitor_printf(mon, "downtime: %" PRIu64 " milliseconds\n",
+                           info->downtime);
+        }
     }
 
     if (info->has_ram) {
@@ -171,6 +181,10 @@ void hmp_info_migrate(Monitor *mon)
                        info->ram->normal);
         monitor_printf(mon, "normal bytes: %" PRIu64 " kbytes\n",
                        info->ram->normal_bytes >> 10);
+        if (info->ram->dirty_pages_rate) {
+            monitor_printf(mon, "dirty pages rate: %" PRIu64 " pages\n",
+                           info->ram->dirty_pages_rate);
+        }
     }
 
     if (info->has_disk) {
@@ -199,7 +213,7 @@ void hmp_info_migrate(Monitor *mon)
     qapi_free_MigrationCapabilityStatusList(caps);
 }
 
-void hmp_info_migrate_capabilities(Monitor *mon)
+void hmp_info_migrate_capabilities(Monitor *mon, const QDict *qdict)
 {
     MigrationCapabilityStatusList *caps, *cap;
 
@@ -218,13 +232,13 @@ void hmp_info_migrate_capabilities(Monitor *mon)
     qapi_free_MigrationCapabilityStatusList(caps);
 }
 
-void hmp_info_migrate_cache_size(Monitor *mon)
+void hmp_info_migrate_cache_size(Monitor *mon, const QDict *qdict)
 {
     monitor_printf(mon, "xbzrel cache size: %" PRId64 " kbytes\n",
                    qmp_query_migrate_cache_size(NULL) >> 10);
 }
 
-void hmp_info_cpus(Monitor *mon)
+void hmp_info_cpus(Monitor *mon, const QDict *qdict)
 {
     CpuInfoList *cpu_list, *cpu;
 
@@ -237,20 +251,19 @@ void hmp_info_cpus(Monitor *mon)
             active = '*';
         }
 
-        monitor_printf(mon, "%c CPU #%" PRId64 ": ", active, cpu->value->CPU);
+        monitor_printf(mon, "%c CPU #%" PRId64 ":", active, cpu->value->CPU);
 
         if (cpu->value->has_pc) {
-            monitor_printf(mon, "pc=0x%016" PRIx64, cpu->value->pc);
+            monitor_printf(mon, " pc=0x%016" PRIx64, cpu->value->pc);
         }
         if (cpu->value->has_nip) {
-            monitor_printf(mon, "nip=0x%016" PRIx64, cpu->value->nip);
+            monitor_printf(mon, " nip=0x%016" PRIx64, cpu->value->nip);
         }
         if (cpu->value->has_npc) {
-            monitor_printf(mon, "pc=0x%016" PRIx64, cpu->value->pc);
-            monitor_printf(mon, "npc=0x%016" PRIx64, cpu->value->npc);
+            monitor_printf(mon, " npc=0x%016" PRIx64, cpu->value->npc);
         }
         if (cpu->value->has_PC) {
-            monitor_printf(mon, "PC=0x%016" PRIx64, cpu->value->PC);
+            monitor_printf(mon, " PC=0x%016" PRIx64, cpu->value->PC);
         }
 
         if (cpu->value->halted) {
@@ -263,7 +276,7 @@ void hmp_info_cpus(Monitor *mon)
     qapi_free_CpuInfoList(cpu_list);
 }
 
-void hmp_info_block(Monitor *mon)
+void hmp_info_block(Monitor *mon, const QDict *qdict)
 {
     BlockInfoList *block_list, *info;
 
@@ -317,7 +330,7 @@ void hmp_info_block(Monitor *mon)
     qapi_free_BlockInfoList(block_list);
 }
 
-void hmp_info_blockstats(Monitor *mon)
+void hmp_info_blockstats(Monitor *mon, const QDict *qdict)
 {
     BlockStatsList *stats_list, *stats;
 
@@ -351,7 +364,7 @@ void hmp_info_blockstats(Monitor *mon)
     qapi_free_BlockStatsList(stats_list);
 }
 
-void hmp_info_vnc(Monitor *mon)
+void hmp_info_vnc(Monitor *mon, const QDict *qdict)
 {
     VncInfo *info;
     Error *err = NULL;
@@ -397,7 +410,7 @@ out:
     qapi_free_VncInfo(info);
 }
 
-void hmp_info_spice(Monitor *mon)
+void hmp_info_spice(Monitor *mon, const QDict *qdict)
 {
     SpiceChannelList *chan;
     SpiceInfo *info;
@@ -444,7 +457,7 @@ out:
     qapi_free_SpiceInfo(info);
 }
 
-void hmp_info_balloon(Monitor *mon)
+void hmp_info_balloon(Monitor *mon, const QDict *qdict)
 {
     BalloonInfo *info;
     Error *err = NULL;
@@ -456,29 +469,7 @@ void hmp_info_balloon(Monitor *mon)
         return;
     }
 
-    monitor_printf(mon, "balloon: actual=%" PRId64, info->actual >> 20);
-    if (info->has_mem_swapped_in) {
-        monitor_printf(mon, " mem_swapped_in=%" PRId64, info->mem_swapped_in);
-    }
-    if (info->has_mem_swapped_out) {
-        monitor_printf(mon, " mem_swapped_out=%" PRId64, info->mem_swapped_out);
-    }
-    if (info->has_major_page_faults) {
-        monitor_printf(mon, " major_page_faults=%" PRId64,
-                       info->major_page_faults);
-    }
-    if (info->has_minor_page_faults) {
-        monitor_printf(mon, " minor_page_faults=%" PRId64,
-                       info->minor_page_faults);
-    }
-    if (info->has_free_mem) {
-        monitor_printf(mon, " free_mem=%" PRId64, info->free_mem);
-    }
-    if (info->has_total_mem) {
-        monitor_printf(mon, " total_mem=%" PRId64, info->total_mem);
-    }
-
-    monitor_printf(mon, "\n");
+    monitor_printf(mon, "balloon: actual=%" PRId64 "\n", info->actual >> 20);
 
     qapi_free_BalloonInfo(info);
 }
@@ -561,7 +552,7 @@ static void hmp_info_pci_device(Monitor *mon, const PciDeviceInfo *dev)
     }
 }
 
-void hmp_info_pci(Monitor *mon)
+void hmp_info_pci(Monitor *mon, const QDict *qdict)
 {
     PciInfoList *info_list, *info;
     Error *err = NULL;
@@ -584,7 +575,7 @@ void hmp_info_pci(Monitor *mon)
     qapi_free_PciInfoList(info_list);
 }
 
-void hmp_info_block_jobs(Monitor *mon)
+void hmp_info_block_jobs(Monitor *mon, const QDict *qdict)
 {
     BlockJobInfoList *list;
     Error *err = NULL;
@@ -675,6 +666,48 @@ void hmp_pmemsave(Monitor *mon, const QDict *qdict)
     hmp_handle_error(mon, &errp);
 }
 
+void hmp_ringbuf_write(Monitor *mon, const QDict *qdict)
+{
+    const char *chardev = qdict_get_str(qdict, "device");
+    const char *data = qdict_get_str(qdict, "data");
+    Error *errp = NULL;
+
+    qmp_ringbuf_write(chardev, data, false, 0, &errp);
+
+    hmp_handle_error(mon, &errp);
+}
+
+void hmp_ringbuf_read(Monitor *mon, const QDict *qdict)
+{
+    uint32_t size = qdict_get_int(qdict, "size");
+    const char *chardev = qdict_get_str(qdict, "device");
+    char *data;
+    Error *errp = NULL;
+    int i;
+
+    data = qmp_ringbuf_read(chardev, size, false, 0, &errp);
+    if (errp) {
+        monitor_printf(mon, "%s\n", error_get_pretty(errp));
+        error_free(errp);
+        return;
+    }
+
+    for (i = 0; data[i]; i++) {
+        unsigned char ch = data[i];
+
+        if (ch == '\\') {
+            monitor_printf(mon, "\\\\");
+        } else if ((ch < 0x20 && ch != '\n' && ch != '\t') || ch == 0x7F) {
+            monitor_printf(mon, "\\u%04X", ch);
+        } else {
+            monitor_printf(mon, "%c", ch);
+        }
+
+    }
+    monitor_printf(mon, "\n");
+    g_free(data);
+}
+
 static void hmp_cont_cb(void *opaque, int err)
 {
     if (!err) {
@@ -763,6 +796,35 @@ void hmp_block_resize(Monitor *mon, const QDict *qdict)
     hmp_handle_error(mon, &errp);
 }
 
+void hmp_drive_mirror(Monitor *mon, const QDict *qdict)
+{
+    const char *device = qdict_get_str(qdict, "device");
+    const char *filename = qdict_get_str(qdict, "target");
+    const char *format = qdict_get_try_str(qdict, "format");
+    int reuse = qdict_get_try_bool(qdict, "reuse", 0);
+    int full = qdict_get_try_bool(qdict, "full", 0);
+    enum NewImageMode mode;
+    Error *errp = NULL;
+
+    if (!filename) {
+        error_set(&errp, QERR_MISSING_PARAMETER, "target");
+        hmp_handle_error(mon, &errp);
+        return;
+    }
+
+    if (reuse) {
+        mode = NEW_IMAGE_MODE_EXISTING;
+    } else {
+        mode = NEW_IMAGE_MODE_ABSOLUTE_PATHS;
+    }
+
+    qmp_drive_mirror(device, filename, !!format, format,
+                     full ? MIRROR_SYNC_MODE_FULL : MIRROR_SYNC_MODE_TOP,
+                     true, mode, false, 0, false, 0, false, 0,
+                     false, 0, false, 0, &errp);
+    hmp_handle_error(mon, &errp);
+}
+
 void hmp_snapshot_blkdev(Monitor *mon, const QDict *qdict)
 {
     const char *device = qdict_get_str(qdict, "device");
@@ -842,7 +904,7 @@ void hmp_migrate_set_capability(Monitor *mon, const QDict *qdict)
     qapi_free_MigrationCapabilityStatusList(caps);
 
     if (err) {
-        monitor_printf(mon, "migrate_set_parameter: %s\n",
+        monitor_printf(mon, "migrate_set_capability: %s\n",
                        error_get_pretty(err));
         error_free(err);
     }
@@ -978,6 +1040,16 @@ void hmp_block_job_resume(Monitor *mon, const QDict *qdict)
     const char *device = qdict_get_str(qdict, "device");
 
     qmp_block_job_resume(device, &error);
+
+    hmp_handle_error(mon, &error);
+}
+
+void hmp_block_job_complete(Monitor *mon, const QDict *qdict)
+{
+    Error *error = NULL;
+    const char *device = qdict_get_str(qdict, "device");
+
+    qmp_block_job_complete(device, &error);
 
     hmp_handle_error(mon, &error);
 }
@@ -1230,4 +1302,102 @@ void hmp_screen_dump(Monitor *mon, const QDict *qdict)
 
     qmp_screendump(filename, &err);
     hmp_handle_error(mon, &err);
+}
+
+void hmp_nbd_server_start(Monitor *mon, const QDict *qdict)
+{
+    const char *uri = qdict_get_str(qdict, "uri");
+    int writable = qdict_get_try_bool(qdict, "writable", 0);
+    int all = qdict_get_try_bool(qdict, "all", 0);
+    Error *local_err = NULL;
+    BlockInfoList *block_list, *info;
+    SocketAddress *addr;
+
+    if (writable && !all) {
+        error_setg(&local_err, "-w only valid together with -a");
+        goto exit;
+    }
+
+    /* First check if the address is valid and start the server.  */
+    addr = socket_parse(uri, &local_err);
+    if (local_err != NULL) {
+        goto exit;
+    }
+
+    qmp_nbd_server_start(addr, &local_err);
+    qapi_free_SocketAddress(addr);
+    if (local_err != NULL) {
+        goto exit;
+    }
+
+    if (!all) {
+        return;
+    }
+
+    /* Then try adding all block devices.  If one fails, close all and
+     * exit.
+     */
+    block_list = qmp_query_block(NULL);
+
+    for (info = block_list; info; info = info->next) {
+        if (!info->value->has_inserted) {
+            continue;
+        }
+
+        qmp_nbd_server_add(info->value->device, true, writable, &local_err);
+
+        if (local_err != NULL) {
+            qmp_nbd_server_stop(NULL);
+            break;
+        }
+    }
+
+    qapi_free_BlockInfoList(block_list);
+
+exit:
+    hmp_handle_error(mon, &local_err);
+}
+
+void hmp_nbd_server_add(Monitor *mon, const QDict *qdict)
+{
+    const char *device = qdict_get_str(qdict, "device");
+    int writable = qdict_get_try_bool(qdict, "writable", 0);
+    Error *local_err = NULL;
+
+    qmp_nbd_server_add(device, true, writable, &local_err);
+
+    if (local_err != NULL) {
+        hmp_handle_error(mon, &local_err);
+    }
+}
+
+void hmp_nbd_server_stop(Monitor *mon, const QDict *qdict)
+{
+    Error *errp = NULL;
+
+    qmp_nbd_server_stop(&errp);
+    hmp_handle_error(mon, &errp);
+}
+
+void hmp_chardev_add(Monitor *mon, const QDict *qdict)
+{
+    const char *args = qdict_get_str(qdict, "args");
+    Error *err = NULL;
+    QemuOpts *opts;
+
+    opts = qemu_opts_parse(qemu_find_opts("chardev"), args, 1);
+    if (opts == NULL) {
+        error_setg(&err, "Parsing chardev args failed");
+    } else {
+        qemu_chr_new_from_opts(opts, NULL, &err);
+    }
+    hmp_handle_error(mon, &err);
+}
+
+void hmp_chardev_remove(Monitor *mon, const QDict *qdict)
+{
+    Error *local_err = NULL;
+
+    qmp_chardev_remove(qdict_get_str(qdict, "id"), &local_err);
+    hmp_handle_error(mon, &local_err);
 }

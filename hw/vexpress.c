@@ -25,11 +25,11 @@
 #include "arm-misc.h"
 #include "primecell.h"
 #include "devices.h"
-#include "net.h"
-#include "sysemu.h"
+#include "net/net.h"
+#include "sysemu/sysemu.h"
 #include "boards.h"
-#include "exec-memory.h"
-#include "blockdev.h"
+#include "exec/address-spaces.h"
+#include "sysemu/blockdev.h"
 #include "flash.h"
 
 #define VEXPRESS_BOARD_ID 0x8e0
@@ -74,7 +74,7 @@ enum {
     VE_DAPROM,
 };
 
-static target_phys_addr_t motherboard_legacy_map[] = {
+static hwaddr motherboard_legacy_map[] = {
     /* CS7: 0x10000000 .. 0x10020000 */
     [VE_SYSREGS] = 0x10000000,
     [VE_SP810] = 0x10001000,
@@ -106,7 +106,7 @@ static target_phys_addr_t motherboard_legacy_map[] = {
     [VE_USB] = 0x4f000000,
 };
 
-static target_phys_addr_t motherboard_aseries_map[] = {
+static hwaddr motherboard_aseries_map[] = {
     /* CS0: 0x08000000 .. 0x0c000000 */
     [VE_NORFLASH0] = 0x08000000,
     /* CS4: 0x0c000000 .. 0x10000000 */
@@ -150,9 +150,9 @@ typedef void DBoardInitFn(const VEDBoardInfo *daughterboard,
                           qemu_irq *pic, uint32_t *proc_id);
 
 struct VEDBoardInfo {
-    const target_phys_addr_t *motherboard_map;
-    target_phys_addr_t loader_start;
-    const target_phys_addr_t gic_cpu_if_addr;
+    const hwaddr *motherboard_map;
+    hwaddr loader_start;
+    const hwaddr gic_cpu_if_addr;
     DBoardInitFn *init;
 };
 
@@ -211,7 +211,7 @@ static void a9_daughterboard_init(const VEDBoardInfo *daughterboard,
     dev = qdev_create(NULL, "a9mpcore_priv");
     qdev_prop_set_uint32(dev, "num-cpu", smp_cpus);
     qdev_init_nofail(dev);
-    busdev = sysbus_from_qdev(dev);
+    busdev = SYS_BUS_DEVICE(dev);
     sysbus_mmio_map(busdev, 0, 0x1e000000);
     for (n = 0; n < smp_cpus; n++) {
         sysbus_connect_irq(busdev, n, cpu_irq[n]);
@@ -271,7 +271,7 @@ static void a15_daughterboard_init(const VEDBoardInfo *daughterboard,
         cpu_model = "cortex-a15";
     }
 
-    *proc_id = 0x14000217;
+    *proc_id = 0x14000237;
 
     for (n = 0; n < smp_cpus; n++) {
         ARMCPU *cpu;
@@ -307,7 +307,7 @@ static void a15_daughterboard_init(const VEDBoardInfo *daughterboard,
     dev = qdev_create(NULL, "a15mpcore_priv");
     qdev_prop_set_uint32(dev, "num-cpu", smp_cpus);
     qdev_init_nofail(dev);
-    busdev = sysbus_from_qdev(dev);
+    busdev = SYS_BUS_DEVICE(dev);
     sysbus_mmio_map(busdev, 0, 0x2c000000);
     for (n = 0; n < smp_cpus; n++) {
         sysbus_connect_irq(busdev, n, cpu_irq[n]);
@@ -348,12 +348,7 @@ static const VEDBoardInfo a15_daughterboard = {
 };
 
 static void vexpress_common_init(const VEDBoardInfo *daughterboard,
-                                 ram_addr_t ram_size,
-                                 const char *boot_device,
-                                 const char *kernel_filename,
-                                 const char *kernel_cmdline,
-                                 const char *initrd_filename,
-                                 const char *cpu_model)
+                                 QEMUMachineInitArgs *args)
 {
     DeviceState *dev, *sysctl, *pl041;
     qemu_irq pic[64];
@@ -364,9 +359,10 @@ static void vexpress_common_init(const VEDBoardInfo *daughterboard,
     MemoryRegion *sysmem = get_system_memory();
     MemoryRegion *vram = g_new(MemoryRegion, 1);
     MemoryRegion *sram = g_new(MemoryRegion, 1);
-    const target_phys_addr_t *map = daughterboard->motherboard_map;
+    const hwaddr *map = daughterboard->motherboard_map;
 
-    daughterboard->init(daughterboard, ram_size, cpu_model, pic, &proc_id);
+    daughterboard->init(daughterboard, args->ram_size, args->cpu_model,
+                        pic, &proc_id);
 
     /* Motherboard peripherals: the wiring is the same but the
      * addresses vary between the legacy and A-Series memory maps.
@@ -378,7 +374,7 @@ static void vexpress_common_init(const VEDBoardInfo *daughterboard,
     qdev_prop_set_uint32(sysctl, "sys_id", sys_id);
     qdev_prop_set_uint32(sysctl, "proc_id", proc_id);
     qdev_init_nofail(sysctl);
-    sysbus_mmio_map(sysbus_from_qdev(sysctl), 0, map[VE_SYSREGS]);
+    sysbus_mmio_map(SYS_BUS_DEVICE(sysctl), 0, map[VE_SYSREGS]);
 
     /* VE_SP810: not modelled */
     /* VE_SERIALPCI: not modelled */
@@ -386,8 +382,8 @@ static void vexpress_common_init(const VEDBoardInfo *daughterboard,
     pl041 = qdev_create(NULL, "pl041");
     qdev_prop_set_uint32(pl041, "nc_fifo_depth", 512);
     qdev_init_nofail(pl041);
-    sysbus_mmio_map(sysbus_from_qdev(pl041), 0, map[VE_PL041]);
-    sysbus_connect_irq(sysbus_from_qdev(pl041), 0, pic[11]);
+    sysbus_mmio_map(SYS_BUS_DEVICE(pl041), 0, map[VE_PL041]);
+    sysbus_connect_irq(SYS_BUS_DEVICE(pl041), 0, pic[11]);
 
     dev = sysbus_create_varargs("pl181", map[VE_MMCI], pic[9], pic[10], NULL);
     /* Wire up MMC card detect and read-only signals */
@@ -454,10 +450,10 @@ static void vexpress_common_init(const VEDBoardInfo *daughterboard,
 
     /* VE_DAPROM: not modelled */
 
-    vexpress_binfo.ram_size = ram_size;
-    vexpress_binfo.kernel_filename = kernel_filename;
-    vexpress_binfo.kernel_cmdline = kernel_cmdline;
-    vexpress_binfo.initrd_filename = initrd_filename;
+    vexpress_binfo.ram_size = args->ram_size;
+    vexpress_binfo.kernel_filename = args->kernel_filename;
+    vexpress_binfo.kernel_cmdline = args->kernel_cmdline;
+    vexpress_binfo.initrd_filename = args->initrd_filename;
     vexpress_binfo.nb_cpus = smp_cpus;
     vexpress_binfo.board_id = VEXPRESS_BOARD_ID;
     vexpress_binfo.loader_start = daughterboard->loader_start;
@@ -467,44 +463,32 @@ static void vexpress_common_init(const VEDBoardInfo *daughterboard,
     arm_load_kernel(arm_env_get_cpu(first_cpu), &vexpress_binfo);
 }
 
-static void vexpress_a9_init(ram_addr_t ram_size,
-                             const char *boot_device,
-                             const char *kernel_filename,
-                             const char *kernel_cmdline,
-                             const char *initrd_filename,
-                             const char *cpu_model)
+static void vexpress_a9_init(QEMUMachineInitArgs *args)
 {
-    vexpress_common_init(&a9_daughterboard,
-                         ram_size, boot_device, kernel_filename,
-                         kernel_cmdline, initrd_filename, cpu_model);
+    vexpress_common_init(&a9_daughterboard, args);
 }
 
-static void vexpress_a15_init(ram_addr_t ram_size,
-                              const char *boot_device,
-                              const char *kernel_filename,
-                              const char *kernel_cmdline,
-                              const char *initrd_filename,
-                              const char *cpu_model)
+static void vexpress_a15_init(QEMUMachineInitArgs *args)
 {
-    vexpress_common_init(&a15_daughterboard,
-                         ram_size, boot_device, kernel_filename,
-                         kernel_cmdline, initrd_filename, cpu_model);
+    vexpress_common_init(&a15_daughterboard, args);
 }
 
 static QEMUMachine vexpress_a9_machine = {
     .name = "vexpress-a9",
     .desc = "ARM Versatile Express for Cortex-A9",
     .init = vexpress_a9_init,
-    .use_scsi = 1,
+    .block_default_type = IF_SCSI,
     .max_cpus = 4,
+    DEFAULT_MACHINE_OPTIONS,
 };
 
 static QEMUMachine vexpress_a15_machine = {
     .name = "vexpress-a15",
     .desc = "ARM Versatile Express for Cortex-A15",
     .init = vexpress_a15_init,
-    .use_scsi = 1,
+    .block_default_type = IF_SCSI,
     .max_cpus = 4,
+    DEFAULT_MACHINE_OPTIONS,
 };
 
 static void vexpress_machine_init(void)

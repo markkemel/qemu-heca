@@ -29,25 +29,29 @@
 #include <sys/mman.h>
 #endif
 #include "config.h"
-#include "monitor.h"
-#include "sysemu.h"
-#include "arch_init.h"
+#include "monitor/monitor.h"
+#include "sysemu/sysemu.h"
+#include "qemu/bitops.h"
+#include "qemu/bitmap.h"
+#include "sysemu/arch_init.h"
 #include "audio/audio.h"
 #include "hw/pc.h"
-#include "hw/pci.h"
+#include "hw/pci/pci.h"
 #include "hw/audiodev.h"
-#include "kvm.h"
-#include "migration.h"
-#include "net.h"
-#include "gdbstub.h"
+#include "sysemu/kvm.h"
+#include "migration/migration.h"
+#include "exec/gdbstub.h"
 #include "hw/smbios.h"
-#include "exec-memory.h"
+#include "exec/address-spaces.h"
 #include "hw/pcspk.h"
-#include "qemu/page_cache.h"
+#include "migration/page_cache.h"
+#include "qemu/config-file.h"
 #include "qmp-commands.h"
+#include "trace.h"
+#include "exec/cpu-all.h"
+
 #include "heca.h"
 #include "sysemu.h"
-
 
 #ifdef DEBUG_ARCH_INIT
 #define DPRINTF(fmt, ...) \
@@ -265,16 +269,21 @@ uint64_t xbzrle_mig_pages_overflow(void)
     return acct_info.xbzrle_overflows;
 }
 
-static void save_block_hdr(QEMUFile *f, RAMBlock *block, ram_addr_t offset,
-        int cont, int flag)
+static size_t save_block_hdr(QEMUFile *f, RAMBlock *block, ram_addr_t offset,
+                             int cont, int flag)
 {
-        qemu_put_be64(f, offset | cont | flag);
-        if (!cont) {
-                qemu_put_byte(f, strlen(block->idstr));
-                qemu_put_buffer(f, (uint8_t *)block->idstr,
-                                strlen(block->idstr));
-        }
+    size_t size;
 
+    qemu_put_be64(f, offset | cont | flag);
+    size = 8;
+
+    if (!cont) {
+        qemu_put_byte(f, strlen(block->idstr));
+        qemu_put_buffer(f, (uint8_t *)block->idstr,
+                        strlen(block->idstr));
+        size += 1 + strlen(block->idstr);
+    }
+    return size;
 }
 
 #define ENCODING_FLAG_XBZRLE 0x1
@@ -321,67 +330,162 @@ static int save_xbzrle_page(QEMUFile *f, uint8_t *current_data,
     }
 
     /* Send XBZRLE based compressed page */
-    save_block_hdr(f, block, offset, cont, RAM_SAVE_FLAG_XBZRLE);
+    bytes_sent = save_block_hdr(f, block, offset, cont, RAM_SAVE_FLAG_XBZRLE);
     qemu_put_byte(f, ENCODING_FLAG_XBZRLE);
     qemu_put_be16(f, encoded_len);
     qemu_put_buffer(f, XBZRLE.encoded_buf, encoded_len);
-    bytes_sent = encoded_len + 1 + 2;
+    bytes_sent += encoded_len + 1 + 2;
     acct_info.xbzrle_pages++;
     acct_info.xbzrle_bytes += bytes_sent;
 
     return bytes_sent;
 }
 
-static RAMBlock *last_block;
+
+/* This is the last block that we have visited serching for dirty pages
+ */
+static RAMBlock *last_seen_block;
+/* This is the last block from where we have sent data */
+static RAMBlock *last_sent_block;
 static ram_addr_t last_offset;
+static unsigned long *migration_bitmap;
+static uint64_t migration_dirty_pages;
+static uint32_t last_version;
+
+static inline
+ram_addr_t migration_bitmap_find_and_reset_dirty(MemoryRegion *mr,
+                                                 ram_addr_t start)
+{
+    unsigned long base = mr->ram_addr >> TARGET_PAGE_BITS;
+    unsigned long nr = base + (start >> TARGET_PAGE_BITS);
+    unsigned long size = base + (int128_get64(mr->size) >> TARGET_PAGE_BITS);
+
+    unsigned long next = find_next_bit(migration_bitmap, size, nr);
+
+    if (next < size) {
+        clear_bit(next, migration_bitmap);
+        migration_dirty_pages--;
+    }
+    return (next - base) << TARGET_PAGE_BITS;
+}
+
+static inline bool migration_bitmap_set_dirty(MemoryRegion *mr,
+                                              ram_addr_t offset)
+{
+    bool ret;
+    int nr = (mr->ram_addr + offset) >> TARGET_PAGE_BITS;
+
+    ret = test_and_set_bit(nr, migration_bitmap);
+
+    if (!ret) {
+        migration_dirty_pages++;
+    }
+    return ret;
+}
+
+static void migration_bitmap_sync(void)
+{
+    RAMBlock *block;
+    ram_addr_t addr;
+    uint64_t num_dirty_pages_init = migration_dirty_pages;
+    MigrationState *s = migrate_get_current();
+    static int64_t start_time;
+    static int64_t num_dirty_pages_period;
+    int64_t end_time;
+
+    if (!start_time) {
+        start_time = qemu_get_clock_ms(rt_clock);
+    }
+
+    trace_migration_bitmap_sync_start();
+    memory_global_sync_dirty_bitmap(get_system_memory());
+
+    QTAILQ_FOREACH(block, &ram_list.blocks, next) {
+        for (addr = 0; addr < block->length; addr += TARGET_PAGE_SIZE) {
+            if (memory_region_test_and_clear_dirty(block->mr,
+                                                   addr, TARGET_PAGE_SIZE,
+                                                   DIRTY_MEMORY_MIGRATION)) {
+                migration_bitmap_set_dirty(block->mr, addr);
+            }
+        }
+    }
+    trace_migration_bitmap_sync_end(migration_dirty_pages
+                                    - num_dirty_pages_init);
+    num_dirty_pages_period += migration_dirty_pages - num_dirty_pages_init;
+    end_time = qemu_get_clock_ms(rt_clock);
+
+    /* more than 1 second = 1000 millisecons */
+    if (end_time > start_time + 1000) {
+        s->dirty_pages_rate = num_dirty_pages_period * 1000
+            / (end_time - start_time);
+        start_time = end_time;
+        num_dirty_pages_period = 0;
+    }
+}
 
 /*
  * ram_save_block: Writes a page of memory to the stream f
  *
- * Returns:  0: if the page hasn't changed
- *          -1: if there are no more dirty pages
- *           n: the amount of bytes written in other case
+ * Returns:  The number of bytes written.
+ *           0 means no dirty pages
  */
+
+static next_ram_block(RAMBlock **block, ram_addr_t *offset)
+{
+    while (true) {
+        if (!block)
+            block = QLIST_FIRST(&ram_list.blocks);
+
+        if (heca_is_enabled()
+                && !heca_is_pre_copy_phase()
+                && heca_is_mig_timer_expired()
+                && !strncmp((*block)->idstr,"pc.ram",strlen((*block)->idstr)))
+            break;
+
+        *block = QLIST_NEXT(*block, next);
+        *offset = 0;
+    }
+}
 
 static int ram_save_block(QEMUFile *f, bool last_stage)
 {
-    RAMBlock *block = last_block;
+    RAMBlock *block = last_seen_block;
     ram_addr_t offset = last_offset;
-    int bytes_sent = -1;
+    bool complete_round = false;
+    int bytes_sent = 0;
     MemoryRegion *mr;
     ram_addr_t current_addr;
 
-    if (!block)
-        block = QLIST_FIRST(&ram_list.blocks);
-
-    // If heca is enabled and timer has expired, skip all pc ram
-    while (!heca_is_pre_copy_phase() && 
-            !strncmp(block->idstr,"pc.ram",strlen(block->idstr)) && 
-            heca_is_enabled() && heca_is_mig_timer_expired()) {
-        offset = 0;
-        block = QLIST_NEXT(block, next);
-        if (!block)
-            block = QLIST_FIRST(&ram_list.blocks);
-    }
+    next_ram_block(&block, &offset);
 
 
-    do {
+    while (true) {
         mr = block->mr;
-        if (memory_region_get_dirty(mr, offset, TARGET_PAGE_SIZE,
-                                    DIRTY_MEMORY_MIGRATION)) {
-            uint8_t *p;
-            int cont = (block == last_block) ? RAM_SAVE_FLAG_CONTINUE : 0;
+        offset = migration_bitmap_find_and_reset_dirty(mr, offset);
+        if (complete_round && block == last_seen_block &&
+            offset >= last_offset) {
+            break;
+        }
+        if (offset >= block->length) {
+            next_ram_block(&block, &offset);
 
-            memory_region_reset_dirty(mr, offset, TARGET_PAGE_SIZE,
-                                      DIRTY_MEMORY_MIGRATION);
+            if (block == QTAILQ_FIRST(&ram_list.blocks))
+                complete_round = true;
+        } else {
+            uint8_t *p;
+            int cont = (block == last_sent_block) ?
+                RAM_SAVE_FLAG_CONTINUE : 0;
 
             p = memory_region_get_ram_ptr(mr) + offset;
 
+            /* In doubt sent page as normal */
+            bytes_sent = -1;
             if (is_dup_page(p)) {
                 acct_info.dup_pages++;
-                save_block_hdr(f, block, offset, cont, RAM_SAVE_FLAG_COMPRESS);
+                bytes_sent = save_block_hdr(f, block, offset, cont,
+                                            RAM_SAVE_FLAG_COMPRESS);
                 qemu_put_byte(f, *p);
-                bytes_sent = 1;
+                bytes_sent += 1;
             } else if (migrate_use_xbzrle()) {
                 current_addr = block->offset + offset;
                 bytes_sent = save_xbzrle_page(f, p, current_addr, block,
@@ -391,36 +495,22 @@ static int ram_save_block(QEMUFile *f, bool last_stage)
                 }
             }
 
-            /* either we didn't send yet (we may have had XBZRLE overflow) */
+            /* XBZRLE overflow or normal page */
             if (bytes_sent == -1) {
-                save_block_hdr(f, block, offset, cont, RAM_SAVE_FLAG_PAGE);
+                bytes_sent = save_block_hdr(f, block, offset, cont, RAM_SAVE_FLAG_PAGE);
                 qemu_put_buffer(f, p, TARGET_PAGE_SIZE);
-                bytes_sent = TARGET_PAGE_SIZE;
+                bytes_sent += TARGET_PAGE_SIZE;
                 acct_info.norm_pages++;
             }
 
             /* if page is unmodified, continue to the next */
-            if (bytes_sent != 0) {
+            if (bytes_sent > 0) {
+                last_sent_block = block;
                 break;
             }
         }
-
-        offset += TARGET_PAGE_SIZE;
-        if (offset >= block->length) {
-            offset = 0;
-            block = QLIST_NEXT(block, next);
-            
-            while (!heca_is_pre_copy_phase() && 
-                    block && !strncmp(block->idstr,"pc.ram",strlen(block->idstr)) && 
-                    heca_is_enabled() && heca_is_mig_timer_expired()) {
-                block = QLIST_NEXT(block, next);
-            }
-
-            if (!block)
-                block = QLIST_FIRST(&ram_list.blocks);
-        }
-    } while (block != last_block || offset != last_offset);
-    last_block = block;
+    }
+    last_seen_block = block;
     last_offset = offset;
 
     return bytes_sent;
@@ -430,7 +520,7 @@ static uint64_t bytes_transferred;
 
 static ram_addr_t ram_save_remaining(void)
 {
-    return ram_list.dirty_pages;
+    return migration_dirty_pages;
 }
 
 uint64_t ram_bytes_remaining(void)
@@ -448,46 +538,21 @@ uint64_t ram_bytes_total(void)
     RAMBlock *block;
     uint64_t total = 0;
 
-    QLIST_FOREACH(block, &ram_list.blocks, next)
+    QTAILQ_FOREACH(block, &ram_list.blocks, next)
         total += block->length;
 
     return total;
 }
 
-static int block_compar(const void *a, const void *b)
-{
-    RAMBlock * const *ablock = a;
-    RAMBlock * const *bblock = b;
-
-    return strcmp((*ablock)->idstr, (*bblock)->idstr);
-}
-
-static void sort_ram_list(void)
-{
-    RAMBlock *block, *nblock, **blocks;
-    int n;
-    n = 0;
-    QLIST_FOREACH(block, &ram_list.blocks, next) {
-        ++n;
-    }
-    blocks = g_malloc(n * sizeof *blocks);
-    n = 0;
-    QLIST_FOREACH_SAFE(block, &ram_list.blocks, next, nblock) {
-        blocks[n++] = block;
-        QLIST_REMOVE(block, next);
-    }
-    qsort(blocks, n, sizeof *blocks, block_compar);
-    while (--n >= 0) {
-        QLIST_INSERT_HEAD(&ram_list.blocks, blocks[n], next);
-    }
-    g_free(blocks);
-}
-
 static void migration_end(void)
 {
-    memory_global_dirty_log_stop();
+    if (migration_bitmap) {
+        memory_global_dirty_log_stop();
+        g_free(migration_bitmap);
+        migration_bitmap = NULL;
+    }
 
-    if (migrate_use_xbzrle()) {
+    if (XBZRLE.cache) {
         cache_fini(XBZRLE.cache);
         g_free(XBZRLE.cache);
         g_free(XBZRLE.encoded_buf);
@@ -502,17 +567,28 @@ static void ram_migration_cancel(void *opaque)
     migration_end();
 }
 
+static void reset_ram_globals(void)
+{
+    last_seen_block = NULL;
+    last_sent_block = NULL;
+    last_offset = 0;
+    last_version = ram_list.version;
+}
+
 #define MAX_WAIT 50 /* ms, half buffered_file limit */
 
 static int ram_save_setup(QEMUFile *f, void *opaque)
 {
-    ram_addr_t addr;
     RAMBlock *block;
+    int64_t ram_pages = last_ram_offset() >> TARGET_PAGE_BITS;
 
+    migration_bitmap = bitmap_new(ram_pages);
+    bitmap_set(migration_bitmap, 0, ram_pages);
+    migration_dirty_pages = ram_pages;
+
+    qemu_mutex_lock_ramlist();
     bytes_transferred = 0;
-    last_block = NULL;
-    last_offset = 0;
-    sort_ram_list();
+    reset_ram_globals();
 
     if (migrate_use_xbzrle()) {
         XBZRLE.cache = cache_init(migrate_xbzrle_cache_size() /
@@ -527,26 +603,18 @@ static int ram_save_setup(QEMUFile *f, void *opaque)
         acct_clear();
     }
 
-    /* Make sure all dirty bits are set */
-    QLIST_FOREACH(block, &ram_list.blocks, next) {
-        for (addr = 0; addr < block->length; addr += TARGET_PAGE_SIZE) {
-            if (!memory_region_get_dirty(block->mr, addr, TARGET_PAGE_SIZE,
-                                         DIRTY_MEMORY_MIGRATION)) {
-                memory_region_set_dirty(block->mr, addr, TARGET_PAGE_SIZE);
-            }
-        }
-    }
-
     memory_global_dirty_log_start();
+    migration_bitmap_sync();
 
     qemu_put_be64(f, ram_bytes_total() | RAM_SAVE_FLAG_MEM_SIZE);
 
-    QLIST_FOREACH(block, &ram_list.blocks, next) {
+    QTAILQ_FOREACH(block, &ram_list.blocks, next) {
         qemu_put_byte(f, strlen(block->idstr));
         qemu_put_buffer(f, (uint8_t *)block->idstr, strlen(block->idstr));
         qemu_put_be64(f, block->length);
     }
 
+    qemu_mutex_unlock_ramlist();
     qemu_put_be64(f, RAM_SAVE_FLAG_EOS);
 
     return 0;
@@ -554,19 +622,23 @@ static int ram_save_setup(QEMUFile *f, void *opaque)
 
 static int ram_save_iterate(QEMUFile *f, void *opaque)
 {
-    uint64_t bytes_transferred_last;
-    double bwidth = 0;
     int ret;
     int i;
-    uint64_t expected_time;
+    int64_t t0;
+    int total_sent = 0;
 
-    bytes_transferred_last = bytes_transferred;
-    bwidth = qemu_get_clock_ns(rt_clock);
+    qemu_mutex_lock_ramlist();
 
+    if (ram_list.version != last_version) {
+        reset_ram_globals();
+    }
+
+    t0 = qemu_get_clock_ns(rt_clock);
     i = 0;
     while ((ret = qemu_file_rate_limit(f)) == 0) {
         
         if (heca_is_enabled() && heca_is_mig_timer_expired()) {
+            ret = -EAGAIN;
             break;
         }
 
@@ -574,10 +646,10 @@ static int ram_save_iterate(QEMUFile *f, void *opaque)
 
         bytes_sent = ram_save_block(f, false);
         /* no more blocks to sent */
-        if (bytes_sent < 0) {
+        if (bytes_sent == 0) {
             break;
         }
-        bytes_transferred += bytes_sent;
+        total_sent += bytes_sent;
         acct_info.iterations++;
         /* we want to check in the 1st loop, just in case it was the 1st time
            and we had to sync the dirty bitmap.
@@ -585,7 +657,7 @@ static int ram_save_iterate(QEMUFile *f, void *opaque)
            iterations
         */
         if ((i & 63) == 0) {
-            uint64_t t1 = (qemu_get_clock_ns(rt_clock) - bwidth) / 1000000;
+            uint64_t t1 = (qemu_get_clock_ns(rt_clock) - t0) / 1000000;
             if (t1 > MAX_WAIT) {
                 DPRINTF("big wait: %" PRIu64 " milliseconds, %d iterations\n",
                         t1, i);
@@ -595,40 +667,21 @@ static int ram_save_iterate(QEMUFile *f, void *opaque)
         i++;
     }
 
+    qemu_mutex_unlock_ramlist();
+
     if (ret < 0) {
+        bytes_transferred += total_sent;
         return ret;
     }
 
-    bwidth = qemu_get_clock_ns(rt_clock) - bwidth;
-    bwidth = (bytes_transferred - bytes_transferred_last) / bwidth;
-
-    /* if we haven't transferred anything this round, force expected_time to a
-     * a very high value, but without crashing */
-    if (bwidth == 0) {
-        bwidth = 0.000001;
-    }
-
     qemu_put_be64(f, RAM_SAVE_FLAG_EOS);
+    total_sent += 8;
+    bytes_transferred += total_sent;
 
-    expected_time = ram_save_remaining() * TARGET_PAGE_SIZE / bwidth;
+    if (heca_is_enabled() && heca_is_mig_timer_expired())
+        return -EAGAIN;
 
-    DPRINTF("ram_save_live: expected(%" PRIu64 ") <= max(%" PRIu64 ")?\n",
-            expected_time, migrate_max_downtime());
-
-    if (expected_time <= migrate_max_downtime()) {
-        memory_global_sync_dirty_bitmap(get_system_memory());
-
-        expected_time = ram_save_remaining() * TARGET_PAGE_SIZE / bwidth;
-
-        return expected_time <= migrate_max_downtime();
-    }
-
-    // Finish interating if heca migration timer has expired
-    if (heca_is_enabled() && heca_is_mig_timer_expired()) {
-        return 1;
-    }
-
-    return 0;
+    return total_sent;
 }
 
 int ram_send_block_info(QEMUFile *f)
@@ -705,7 +758,8 @@ int get_ram_unmap_info(QEMUFile *f)
 
 static int ram_save_complete(QEMUFile *f, void *opaque)
 {
-    memory_global_sync_dirty_bitmap(get_system_memory());
+    qemu_mutex_lock_ramlist();
+    migration_bitmap_sync();
 
     /* try transferring iterative blocks of memory */
 
@@ -715,17 +769,30 @@ static int ram_save_complete(QEMUFile *f, void *opaque)
 
         bytes_sent = ram_save_block(f, true);
         /* no more blocks to sent */
-        if (bytes_sent < 0) {
+        if (bytes_sent == 0) {
             break;
         }
         bytes_transferred += bytes_sent;
     }
-    
+    migration_end();
+
+    qemu_mutex_unlock_ramlist();
     qemu_put_be64(f, RAM_SAVE_FLAG_EOS);
 
-    memory_global_dirty_log_stop();
-                
     return 0;
+}
+
+static uint64_t ram_save_pending(QEMUFile *f, void *opaque, uint64_t max_size)
+{
+    uint64_t remaining_size;
+
+    remaining_size = ram_save_remaining() * TARGET_PAGE_SIZE;
+
+    if (remaining_size < max_size) {
+        migration_bitmap_sync();
+        remaining_size = ram_save_remaining() * TARGET_PAGE_SIZE;
+    }
+    return remaining_size;
 }
 
 static int load_xbzrle(QEMUFile *f, ram_addr_t addr, void *host)
@@ -790,7 +857,7 @@ static inline void *host_from_stream_offset(QEMUFile *f,
     qemu_get_buffer(f, (uint8_t *)id, len);
     id[len] = 0;
 
-    QLIST_FOREACH(block, &ram_list.blocks, next) {
+    QTAILQ_FOREACH(block, &ram_list.blocks, next) {
         if (!strncmp(id, block->idstr, sizeof(id)))
             return memory_region_get_ram_ptr(block->mr) + offset;
     }
@@ -834,7 +901,7 @@ static int ram_load(QEMUFile *f, void *opaque, int version_id)
                     id[len] = 0;
                     length = qemu_get_be64(f);
 
-                    QLIST_FOREACH(block, &ram_list.blocks, next) {
+                    QTAILQ_FOREACH(block, &ram_list.blocks, next) {
                         if (!strncmp(id, block->idstr, sizeof(id))) {
                             if (block->length != length) {
                                 ret =  -EINVAL;
@@ -869,7 +936,8 @@ static int ram_load(QEMUFile *f, void *opaque, int version_id)
             memset(host, ch, TARGET_PAGE_SIZE);
 #ifndef _WIN32
             if (ch == 0 &&
-                (!kvm_enabled() || kvm_has_sync_mmu())) {
+                (!kvm_enabled() || kvm_has_sync_mmu()) &&
+                getpagesize() <= TARGET_PAGE_SIZE) {
                 qemu_madvise(host, TARGET_PAGE_SIZE, QEMU_MADV_DONTNEED);
             }
 #endif
@@ -883,9 +951,6 @@ static int ram_load(QEMUFile *f, void *opaque, int version_id)
 
             qemu_get_buffer(f, host, TARGET_PAGE_SIZE);
         } else if (flags & RAM_SAVE_FLAG_XBZRLE) {
-            if (!migrate_use_xbzrle()) {
-                return -EINVAL;
-            }
             void *host = host_from_stream_offset(f, addr, flags);
             if (!host) {
                 return -EINVAL;
@@ -913,6 +978,7 @@ SaveVMHandlers savevm_ram_handlers = {
     .save_live_setup = ram_save_setup,
     .save_live_iterate = ram_save_iterate,
     .save_live_complete = ram_save_complete,
+    .save_live_pending = ram_save_pending,
     .load_state = ram_load,
     .cancel = ram_migration_cancel,
 };

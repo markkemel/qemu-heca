@@ -466,6 +466,73 @@ Note: inject-nmi fails when the guest doesn't support injecting.
 EQMP
 
     {
+        .name       = "ringbuf-write",
+        .args_type  = "device:s,data:s,format:s?",
+        .mhandler.cmd_new = qmp_marshal_input_ringbuf_write,
+    },
+
+SQMP
+ringbuf-write
+-------------
+
+Write to a ring buffer character device.
+
+Arguments:
+
+- "device": ring buffer character device name (json-string)
+- "data": data to write (json-string)
+- "format": data format (json-string, optional)
+          - Possible values: "utf8" (default), "base64"
+            Bug: invalid base64 is currently not rejected.
+            Whitespace *is* invalid.
+
+Example:
+
+-> { "execute": "ringbuf-write",
+                "arguments": { "device": "foo",
+                               "data": "abcdefgh",
+                               "format": "utf8" } }
+<- { "return": {} }
+
+EQMP
+
+    {
+        .name       = "ringbuf-read",
+        .args_type  = "device:s,size:i,format:s?",
+        .mhandler.cmd_new = qmp_marshal_input_ringbuf_read,
+    },
+
+SQMP
+ringbuf-read
+-------------
+
+Read from a ring buffer character device.
+
+Arguments:
+
+- "device": ring buffer character device name (json-string)
+- "size": how many bytes to read at most (json-int)
+          - Number of data bytes, not number of characters in encoded data
+- "format": data format (json-string, optional)
+          - Possible values: "utf8" (default), "base64"
+          - Naturally, format "utf8" works only when the ring buffer
+            contains valid UTF-8 text.  Invalid UTF-8 sequences get
+            replaced.  Bug: replacement doesn't work.  Bug: can screw
+            up on encountering NUL characters, after the ring buffer
+            lost data, and when reading stops because the size limit
+            is reached.
+
+Example:
+
+-> { "execute": "ringbuf-read",
+                "arguments": { "device": "foo",
+                               "size": 1000,
+                               "format": "utf8" } }
+<- {"return": "abcdefgh"}
+
+EQMP
+
+    {
         .name       = "xen-save-devices-state",
         .args_type  = "filename:F",
     .mhandler.cmd_new = qmp_marshal_input_xen_save_devices_state,
@@ -843,6 +910,11 @@ EQMP
         .mhandler.cmd_new = qmp_marshal_input_block_job_resume,
     },
     {
+        .name       = "block-job-complete",
+        .args_type  = "device:B",
+        .mhandler.cmd_new = qmp_marshal_input_block_job_complete,
+    },
+    {
         .name       = "transaction",
         .args_type  = "actions:q",
         .mhandler.cmd_new = qmp_marshal_input_transaction,
@@ -926,6 +998,62 @@ Example:
                                                          "snapshot-file":
                                                         "/some/place/my-image",
                                                         "format": "qcow2" } }
+<- { "return": {} }
+
+EQMP
+
+    {
+        .name       = "drive-mirror",
+        .args_type  = "sync:s,device:B,target:s,speed:i?,mode:s?,format:s?,"
+                      "on-source-error:s?,on-target-error:s?,"
+                      "granularity:i?,buf-size:i?",
+        .mhandler.cmd_new = qmp_marshal_input_drive_mirror,
+    },
+
+SQMP
+drive-mirror
+------------
+
+Start mirroring a block device's writes to a new destination. target
+specifies the target of the new image. If the file exists, or if it is
+a device, it will be used as the new destination for writes. If it does not
+exist, a new file will be created. format specifies the format of the
+mirror image, default is to probe if mode='existing', else the format
+of the source.
+
+Arguments:
+
+- "device": device name to operate on (json-string)
+- "target": name of new image file (json-string)
+- "format": format of new image (json-string, optional)
+- "mode": how an image file should be created into the target
+  file/device (NewImageMode, optional, default 'absolute-paths')
+- "speed": maximum speed of the streaming job, in bytes per second
+  (json-int)
+- "granularity": granularity of the dirty bitmap, in bytes (json-int, optional)
+- "buf_size": maximum amount of data in flight from source to target, in bytes
+  (json-int, default 10M)
+- "sync": what parts of the disk image should be copied to the destination;
+  possibilities include "full" for all the disk, "top" for only the sectors
+  allocated in the topmost image, or "none" to only replicate new I/O
+  (MirrorSyncMode).
+- "on-source-error": the action to take on an error on the source
+  (BlockdevOnError, default 'report')
+- "on-target-error": the action to take on an error on the target
+  (BlockdevOnError, default 'report')
+
+The default value of the granularity is the image cluster size clamped
+between 4096 and 65536, if the image format defines one.  If the format
+does not define a cluster size, the default value of the granularity
+is 65536.
+
+
+Example:
+
+-> { "execute": "drive-mirror", "arguments": { "device": "ide-hd0",
+                                               "target": "/some/place/my-image",
+                                               "sync": "full",
+                                               "format": "qcow2" } }
 <- { "return": {} }
 
 EQMP
@@ -1532,7 +1660,7 @@ Each json-object contain the following:
          - Possible values: "unknown"
 - "removable": true if the device is removable, false otherwise (json-bool)
 - "locked": true if the device is locked, false otherwise (json-bool)
-- "tray-open": only present if removable, true if the device has a tray,
+- "tray_open": only present if removable, true if the device has a tray,
                and it is open (json-bool)
 - "inserted": only present if the device is inserted, it is a json-object
    containing the following:
@@ -2304,6 +2432,11 @@ The main json-object contains the following:
 - "total-time": total amount of ms since migration started.  If
                 migration has ended, it returns the total migration
 		 time (json-int)
+- "downtime": only present when migration has finished correctly
+              total amount in ms for downtime that happened (json-int)
+- "expected-downtime": only present while migration is active
+                total amount in ms for downtime that was calculated on
+		the last bitmap round (json-int)
 - "ram": only present if "status" is "active", it is a json-object with the
   following RAM information (in bytes):
          - "transferred": amount transferred (json-int)
@@ -2341,6 +2474,7 @@ Examples:
           "remaining":123,
           "total":246,
           "total-time":12345,
+          "downtime":12345,
           "duplicate":123,
           "normal":123,
           "normal-bytes":123456
@@ -2364,6 +2498,7 @@ Examples:
             "remaining":123,
             "total":246,
             "total-time":12345,
+            "expected-downtime":12345,
             "duplicate":123,
             "normal":123,
             "normal-bytes":123456
@@ -2382,6 +2517,7 @@ Examples:
             "remaining":1053304,
             "transferred":3720,
             "total-time":12345,
+            "expected-downtime":12345,
             "duplicate":123,
             "normal":123,
             "normal-bytes":123456
@@ -2406,6 +2542,7 @@ Examples:
             "remaining":1053304,
             "transferred":3720,
             "total-time":12345,
+            "expected-downtime":12345,
             "duplicate":10,
             "normal":3333,
             "normal-bytes":3412992
@@ -2465,10 +2602,8 @@ Arguments:
 Example:
 
 -> { "execute": "query-migrate-capabilities" }
-<- { "return": {
-        "capabilities" :  [ { "capability" : "xbzrle", "state" : false } ]
-     }
-   }
+<- { "return": [ { "state": false, "capability": "xbzrle" } ] }
+
 EQMP
 
     {
@@ -2487,13 +2622,6 @@ Make an asynchronous request for balloon info. When the request completes a
 json-object will be returned containing the following data:
 
 - "actual": current balloon value in bytes (json-int)
-- "mem_swapped_in": Amount of memory swapped in bytes (json-int, optional)
-- "mem_swapped_out": Amount of memory swapped out in bytes (json-int, optional)
-- "major_page_faults": Number of major faults (json-int, optional)
-- "minor_page_faults": Number of minor faults (json-int, optional)
-- "free_mem": Total amount of free and unused memory in
-              bytes (json-int, optional)
-- "total_mem": Total amount of available memory in bytes (json-int, optional)
 
 Example:
 
@@ -2501,12 +2629,6 @@ Example:
 <- {
       "return":{
          "actual":1073741824,
-         "mem_swapped_in":0,
-         "mem_swapped_out":0,
-         "major_page_faults":142,
-         "minor_page_faults":239245,
-         "free_mem":1014185984,
-         "total_mem":1044668416
       }
    }
 
@@ -2543,6 +2665,22 @@ EQMP
     },
 
     {
+        .name       = "nbd-server-start",
+        .args_type  = "addr:q",
+        .mhandler.cmd_new = qmp_marshal_input_nbd_server_start,
+    },
+    {
+        .name       = "nbd-server-add",
+        .args_type  = "device:B,writable:b?",
+        .mhandler.cmd_new = qmp_marshal_input_nbd_server_add,
+    },
+    {
+        .name       = "nbd-server-stop",
+        .args_type  = "",
+        .mhandler.cmd_new = qmp_marshal_input_nbd_server_stop,
+    },
+
+    {
         .name       = "change-vnc-password",
         .args_type  = "password:s",
         .mhandler.cmd_new = qmp_marshal_input_change_vnc_password,
@@ -2576,3 +2714,64 @@ EQMP
         .args_type  = "",
         .mhandler.cmd_new = qmp_marshal_input_query_target,
     },
+
+    {
+        .name       = "chardev-add",
+        .args_type  = "id:s,backend:q",
+        .mhandler.cmd_new = qmp_marshal_input_chardev_add,
+    },
+
+SQMP
+chardev-add
+----------------
+
+Add a chardev.
+
+Arguments:
+
+- "id": the chardev's ID, must be unique (json-string)
+- "backend": chardev backend type + parameters
+
+Examples:
+
+-> { "execute" : "chardev-add",
+     "arguments" : { "id" : "foo",
+                     "backend" : { "type" : "null", "data" : {} } } }
+<- { "return": {} }
+
+-> { "execute" : "chardev-add",
+     "arguments" : { "id" : "bar",
+                     "backend" : { "type" : "file",
+                                   "data" : { "out" : "/tmp/bar.log" } } } }
+<- { "return": {} }
+
+-> { "execute" : "chardev-add",
+     "arguments" : { "id" : "baz",
+                     "backend" : { "type" : "pty", "data" : {} } } }
+<- { "return": { "pty" : "/dev/pty/42" } }
+
+EQMP
+
+    {
+        .name       = "chardev-remove",
+        .args_type  = "id:s",
+        .mhandler.cmd_new = qmp_marshal_input_chardev_remove,
+    },
+
+
+SQMP
+chardev-remove
+--------------
+
+Remove a chardev.
+
+Arguments:
+
+- "id": the chardev's ID, must exist and not be in use (json-string)
+
+Example:
+
+-> { "execute": "chardev-remove", "arguments": { "id" : "foo" } }
+<- { "return": {} }
+
+EQMP

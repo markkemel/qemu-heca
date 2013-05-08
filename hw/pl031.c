@@ -12,8 +12,8 @@
  */
 
 #include "sysbus.h"
-#include "qemu-timer.h"
-#include "sysemu.h"
+#include "qemu/timer.h"
+#include "sysemu/sysemu.h"
 
 //#define DEBUG_PL031
 
@@ -95,7 +95,7 @@ static void pl031_set_alarm(pl031_state *s)
     }
 }
 
-static uint64_t pl031_read(void *opaque, target_phys_addr_t offset,
+static uint64_t pl031_read(void *opaque, hwaddr offset,
                            unsigned size)
 {
     pl031_state *s = (pl031_state *)opaque;
@@ -120,18 +120,20 @@ static uint64_t pl031_read(void *opaque, target_phys_addr_t offset,
     case RTC_MIS:
         return s->is & s->im;
     case RTC_ICR:
-        fprintf(stderr, "qemu: pl031_read: Unexpected offset 0x%x\n",
-                (int)offset);
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "pl031: read of write-only register at offset 0x%x\n",
+                      (int)offset);
         break;
     default:
-        hw_error("pl031_read: Bad offset 0x%x\n", (int)offset);
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "pl031_read: Bad offset 0x%x\n", (int)offset);
         break;
     }
 
     return 0;
 }
 
-static void pl031_write(void * opaque, target_phys_addr_t offset,
+static void pl031_write(void * opaque, hwaddr offset,
                         uint64_t value, unsigned size)
 {
     pl031_state *s = (pl031_state *)opaque;
@@ -167,12 +169,14 @@ static void pl031_write(void * opaque, target_phys_addr_t offset,
     case RTC_DR:
     case RTC_MIS:
     case RTC_RIS:
-        fprintf(stderr, "qemu: pl031_write: Unexpected offset 0x%x\n",
-                (int)offset);
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "pl031: write to read-only register at offset 0x%x\n",
+                      (int)offset);
         break;
 
     default:
-        hw_error("pl031_write: Bad offset 0x%x\n", (int)offset);
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "pl031_write: Bad offset 0x%x\n", (int)offset);
         break;
     }
 }
@@ -246,7 +250,7 @@ static void pl031_class_init(ObjectClass *klass, void *data)
     dc->vmsd = &vmstate_pl031;
 }
 
-static TypeInfo pl031_info = {
+static const TypeInfo pl031_info = {
     .name          = "pl031",
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(pl031_state),

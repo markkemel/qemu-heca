@@ -17,9 +17,10 @@
  * with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 #include "hw.h"
-#include "console.h"
+#include "ui/console.h"
 #include "omap.h"
 #include "framebuffer.h"
+#include "ui/pixel_ops.h"
 
 struct omap_lcd_panel_s {
     MemoryRegion *sysmem;
@@ -65,8 +66,6 @@ static void omap_lcd_interrupts(struct omap_lcd_panel_s *s)
 
     qemu_irq_lower(s->irq);
 }
-
-#include "pixel_ops.h"
 
 #define draw_line_func drawfn
 
@@ -117,7 +116,7 @@ static void omap_update_display(void *opaque)
     draw_line_func draw_line;
     int size, height, first, last;
     int width, linesize, step, bpp, frame_offset;
-    target_phys_addr_t frame_base;
+    hwaddr frame_base;
 
     if (!omap_lcd || omap_lcd->plm == 1 ||
                     !omap_lcd->enable || !ds_get_bits_per_pixel(omap_lcd->state))
@@ -219,7 +218,7 @@ static void omap_update_display(void *opaque)
                                draw_line, omap_lcd->palette,
                                &first, &last);
     if (first >= 0) {
-        dpy_update(omap_lcd->state, 0, first, width, last - first + 1);
+        dpy_gfx_update(omap_lcd->state, 0, first, width, last - first + 1);
     }
     omap_lcd->invalidate = 0;
 }
@@ -359,7 +358,7 @@ static void omap_lcd_update(struct omap_lcd_panel_s *s) {
     }
 }
 
-static uint64_t omap_lcdc_read(void *opaque, target_phys_addr_t addr,
+static uint64_t omap_lcdc_read(void *opaque, hwaddr addr,
                                unsigned size)
 {
     struct omap_lcd_panel_s *s = (struct omap_lcd_panel_s *) opaque;
@@ -392,7 +391,7 @@ static uint64_t omap_lcdc_read(void *opaque, target_phys_addr_t addr,
     return 0;
 }
 
-static void omap_lcdc_write(void *opaque, target_phys_addr_t addr,
+static void omap_lcdc_write(void *opaque, hwaddr addr,
                             uint64_t value, unsigned size)
 {
     struct omap_lcd_panel_s *s = (struct omap_lcd_panel_s *) opaque;
@@ -465,7 +464,7 @@ void omap_lcdc_reset(struct omap_lcd_panel_s *s)
 }
 
 struct omap_lcd_panel_s *omap_lcdc_init(MemoryRegion *sysmem,
-                                        target_phys_addr_t base,
+                                        hwaddr base,
                                         qemu_irq irq,
                                         struct omap_dma_lcd_channel_s *dma,
                                         omap_clk clk)

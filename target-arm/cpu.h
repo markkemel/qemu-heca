@@ -27,9 +27,9 @@
 
 #include "config.h"
 #include "qemu-common.h"
-#include "cpu-defs.h"
+#include "exec/cpu-defs.h"
 
-#include "softfloat.h"
+#include "fpu/softfloat.h"
 
 #define TARGET_HAS_ICE 1
 
@@ -659,7 +659,7 @@ static inline void cpu_clone_regs(CPUARMState *env, target_ulong newsp)
 }
 #endif
 
-#include "cpu-all.h"
+#include "exec/cpu-all.h"
 
 /* Bit usage in the TB flags field: */
 #define ARM_TBFLAG_THUMB_SHIFT      0
@@ -718,13 +718,15 @@ static inline void cpu_get_tb_cpu_state(CPUARMState *env, target_ulong *pc,
     }
 }
 
-static inline bool cpu_has_work(CPUARMState *env)
+static inline bool cpu_has_work(CPUState *cpu)
 {
+    CPUARMState *env = &ARM_CPU(cpu)->env;
+
     return env->interrupt_request &
         (CPU_INTERRUPT_FIQ | CPU_INTERRUPT_HARD | CPU_INTERRUPT_EXITTB);
 }
 
-#include "exec-all.h"
+#include "exec/exec-all.h"
 
 static inline void cpu_pc_from_tb(CPUARMState *env, TranslationBlock *tb)
 {

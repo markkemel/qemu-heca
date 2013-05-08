@@ -24,7 +24,7 @@
 
 #include "sysbus.h"
 #include "ptimer.h"
-#include "qemu-log.h"
+#include "qemu/log.h"
 
 #define D(x)
 
@@ -72,7 +72,7 @@ static inline unsigned int num_timers(struct timerblock *t)
     return 2 - t->one_timer_only;
 }
 
-static inline unsigned int timer_from_addr(target_phys_addr_t addr)
+static inline unsigned int timer_from_addr(hwaddr addr)
 {
     /* Timers get a 4x32bit control reg area each.  */
     return addr >> 2;
@@ -93,7 +93,7 @@ static void timer_update_irq(struct timerblock *t)
 }
 
 static uint64_t
-timer_read(void *opaque, target_phys_addr_t addr, unsigned int size)
+timer_read(void *opaque, hwaddr addr, unsigned int size)
 {
     struct timerblock *t = opaque;
     struct xlx_timer *xt;
@@ -142,7 +142,7 @@ static void timer_enable(struct xlx_timer *xt)
 }
 
 static void
-timer_write(void *opaque, target_phys_addr_t addr,
+timer_write(void *opaque, hwaddr addr,
             uint64_t val64, unsigned int size)
 {
     struct timerblock *t = opaque;
@@ -240,7 +240,7 @@ static void xilinx_timer_class_init(ObjectClass *klass, void *data)
     dc->props = xilinx_timer_properties;
 }
 
-static TypeInfo xilinx_timer_info = {
+static const TypeInfo xilinx_timer_info = {
     .name          = "xlnx.xps-timer",
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(struct timerblock),

@@ -26,8 +26,8 @@
 
 #include "hw.h"
 #include "pc.h"
-#include "console.h"
-#include "qemu-timer.h"
+#include "ui/console.h"
+#include "qemu/timer.h"
 #include "hpet_emul.h"
 #include "sysbus.h"
 #include "mc146818rtc.h"
@@ -370,20 +370,20 @@ static void hpet_del_timer(HPETTimer *t)
 }
 
 #ifdef HPET_DEBUG
-static uint32_t hpet_ram_readb(void *opaque, target_phys_addr_t addr)
+static uint32_t hpet_ram_readb(void *opaque, hwaddr addr)
 {
     printf("qemu: hpet_read b at %" PRIx64 "\n", addr);
     return 0;
 }
 
-static uint32_t hpet_ram_readw(void *opaque, target_phys_addr_t addr)
+static uint32_t hpet_ram_readw(void *opaque, hwaddr addr)
 {
     printf("qemu: hpet_read w at %" PRIx64 "\n", addr);
     return 0;
 }
 #endif
 
-static uint64_t hpet_ram_read(void *opaque, target_phys_addr_t addr,
+static uint64_t hpet_ram_read(void *opaque, hwaddr addr,
                               unsigned size)
 {
     HPETState *s = opaque;
@@ -455,7 +455,7 @@ static uint64_t hpet_ram_read(void *opaque, target_phys_addr_t addr,
     return 0;
 }
 
-static void hpet_ram_write(void *opaque, target_phys_addr_t addr,
+static void hpet_ram_write(void *opaque, hwaddr addr,
                            uint64_t value, unsigned size)
 {
     int i;
@@ -634,7 +634,7 @@ static const MemoryRegionOps hpet_ram_ops = {
 
 static void hpet_reset(DeviceState *d)
 {
-    HPETState *s = FROM_SYSBUS(HPETState, sysbus_from_qdev(d));
+    HPETState *s = FROM_SYSBUS(HPETState, SYS_BUS_DEVICE(d));
     int i;
 
     for (i = 0; i < s->num_timers; i++) {
@@ -657,7 +657,7 @@ static void hpet_reset(DeviceState *d)
     s->hpet_offset = 0ULL;
     s->config = 0ULL;
     hpet_cfg.hpet[s->hpet_id].event_timer_block_id = (uint32_t)s->capability;
-    hpet_cfg.hpet[s->hpet_id].address = sysbus_from_qdev(d)->mmio[0].addr;
+    hpet_cfg.hpet[s->hpet_id].address = SYS_BUS_DEVICE(d)->mmio[0].addr;
 
     /* to document that the RTC lowers its output on reset as well */
     s->rtc_irq_level = 0;
@@ -745,7 +745,7 @@ static void hpet_device_class_init(ObjectClass *klass, void *data)
     dc->props = hpet_device_properties;
 }
 
-static TypeInfo hpet_device_info = {
+static const TypeInfo hpet_device_info = {
     .name          = "hpet",
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(HPETState),

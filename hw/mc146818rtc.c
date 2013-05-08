@@ -22,9 +22,10 @@
  * THE SOFTWARE.
  */
 #include "hw.h"
-#include "qemu-timer.h"
-#include "sysemu.h"
+#include "qemu/timer.h"
+#include "sysemu/sysemu.h"
 #include "mc146818rtc.h"
+#include "qapi/visitor.h"
 
 #ifdef TARGET_I386
 #include "apic.h"
@@ -383,7 +384,8 @@ static void rtc_update_timer(void *opaque)
     check_update_timer(s);
 }
 
-static void cmos_ioport_write(void *opaque, uint32_t addr, uint32_t data)
+static void cmos_ioport_write(void *opaque, hwaddr addr,
+                              uint64_t data, unsigned size)
 {
     RTCState *s = opaque;
 
@@ -568,7 +570,11 @@ static void rtc_update_time(RTCState *s)
     guest_nsec = get_guest_rtc_ns(s);
     guest_sec = guest_nsec / NSEC_PER_SEC;
     gmtime_r(&guest_sec, &ret);
-    rtc_set_cmos(s, &ret);
+
+    /* Is SET flag of Register B disabled? */
+    if ((s->cmos_data[RTC_REG_B] & REG_B_SET) == 0) {
+        rtc_set_cmos(s, &ret);
+    }
 }
 
 static int update_in_progress(RTCState *s)
@@ -595,7 +601,8 @@ static int update_in_progress(RTCState *s)
     return 0;
 }
 
-static uint32_t cmos_ioport_read(void *opaque, uint32_t addr)
+static uint64_t cmos_ioport_read(void *opaque, hwaddr addr,
+                                 unsigned size)
 {
     RTCState *s = opaque;
     int ret;
@@ -769,13 +776,14 @@ static void rtc_reset(void *opaque)
 #endif
 }
 
-static const MemoryRegionPortio cmos_portio[] = {
-    {0, 2, 1, .read = cmos_ioport_read, .write = cmos_ioport_write },
-    PORTIO_END_OF_LIST(),
-};
-
 static const MemoryRegionOps cmos_ops = {
-    .old_portio = cmos_portio
+    .read = cmos_ioport_read,
+    .write = cmos_ioport_write,
+    .impl = {
+        .min_access_size = 1,
+        .max_access_size = 1,
+    },
+    .endianness = DEVICE_LITTLE_ENDIAN,
 };
 
 static void rtc_get_date(Object *obj, Visitor *v, void *opaque,
@@ -890,7 +898,7 @@ static void rtc_class_initfn(ObjectClass *klass, void *data)
     dc->props = mc146818rtc_properties;
 }
 
-static TypeInfo mc146818rtc_info = {
+static const TypeInfo mc146818rtc_info = {
     .name          = "mc146818rtc",
     .parent        = TYPE_ISA_DEVICE,
     .instance_size = sizeof(RTCState),

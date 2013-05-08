@@ -12,10 +12,10 @@
 
 #include "qemu-common.h"
 #include "hw/hw.h"
-#include "hw/msi.h"
+#include "hw/pci/msi.h"
 #include "cpu.h"
-#include "gdbstub.h"
-#include "kvm.h"
+#include "exec/gdbstub.h"
+#include "sysemu/kvm.h"
 
 KVMState *kvm_state;
 bool kvm_kernel_irqchip;
@@ -24,17 +24,7 @@ bool kvm_irqfds_allowed;
 bool kvm_msi_via_irqfd_allowed;
 bool kvm_gsi_routing_allowed;
 
-int kvm_init_vcpu(CPUArchState *env)
-{
-    return -ENOSYS;
-}
-
-int kvm_coalesce_mmio_region(target_phys_addr_t start, ram_addr_t size)
-{
-    return -ENOSYS;
-}
-
-int kvm_uncoalesce_mmio_region(target_phys_addr_t start, ram_addr_t size)
+int kvm_init_vcpu(CPUState *cpu)
 {
     return -ENOSYS;
 }
@@ -122,7 +112,7 @@ int kvm_set_ioeventfd_mmio(int fd, uint32_t adr, uint32_t val, bool assign, uint
     return -ENOSYS;
 }
 
-int kvm_on_sigbus_vcpu(CPUArchState *env, int code, void *addr)
+int kvm_on_sigbus_vcpu(CPUState *cpu, int code, void *addr)
 {
     return 1;
 }
@@ -139,6 +129,11 @@ int kvm_irqchip_add_msi_route(KVMState *s, MSIMessage msg)
 
 void kvm_irqchip_release_virq(KVMState *s, int virq)
 {
+}
+
+int kvm_irqchip_update_msi_route(KVMState *s, int virq, MSIMessage msg)
+{
+    return -ENOSYS;
 }
 
 int kvm_irqchip_add_irqfd_notifier(KVMState *s, EventNotifier *n, int virq)
