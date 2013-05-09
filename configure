@@ -1346,7 +1346,6 @@ case " $target_list " in
   *) softmmu=no
   ;;
 esac
-softmmu=no
 
 feature_not_found() {
   feature=$1

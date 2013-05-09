@@ -11,7 +11,6 @@
 #include <arpa/inet.h>
 #include <wordexp.h>
 #include "memory.h"
-#include "qemu-timer.h"
 
 void heca_init(void* ram_ptr, uint64_t ram_size);
 void heca_migrate_dest_init(const char* dest_ip, const char* source_ip); 

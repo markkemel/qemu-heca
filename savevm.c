@@ -39,7 +39,7 @@
 #include "qmp-commands.h"
 #include "trace.h"
 #include "qemu/bitops.h"
-#include "arch_init.h"
+#include "sysemu/arch_init.h"
 #include "heca.h"
 
 #define SELF_ANNOUNCE_ROUNDS 5

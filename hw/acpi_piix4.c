@@ -625,7 +625,8 @@ static void piix4_acpi_system_hot_add_init(MemoryRegion *parent,
     pci_bus_hotplug(bus, piix4_device_hotplug, &s->dev.qdev);
 }
 
-#if defined(TARGET_I386)
+#if 0
+//#if defined(TARGET_I386)
 static void enable_processor(PIIX4PMState *s, int cpu)
 {
     struct gpe_regs *g = &s->gpe_cpu;

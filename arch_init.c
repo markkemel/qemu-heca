@@ -49,9 +49,8 @@
 #include "qmp-commands.h"
 #include "trace.h"
 #include "exec/cpu-all.h"
-
+#include "sysemu/sysemu.h"
 #include "heca.h"
-#include "sysemu.h"
 
 #ifdef DEBUG_ARCH_INIT
 #define DPRINTF(fmt, ...) \
@@ -430,11 +429,11 @@ static void migration_bitmap_sync(void)
  *           0 means no dirty pages
  */
 
-static next_ram_block(RAMBlock **block, ram_addr_t *offset)
+static void next_ram_block(RAMBlock **block, ram_addr_t *offset)
 {
     while (true) {
-        if (!block)
-            block = QLIST_FIRST(&ram_list.blocks);
+        if (!*block)
+            *block = QTAILQ_FIRST(&ram_list.blocks);
 
         if (heca_is_enabled()
                 && !heca_is_pre_copy_phase()
@@ -442,7 +441,7 @@ static next_ram_block(RAMBlock **block, ram_addr_t *offset)
                 && !strncmp((*block)->idstr,"pc.ram",strlen((*block)->idstr)))
             break;
 
-        *block = QLIST_NEXT(*block, next);
+        *block = QTAILQ_NEXT(*block, next);
         *offset = 0;
     }
 }
@@ -457,7 +456,6 @@ static int ram_save_block(QEMUFile *f, bool last_stage)
     ram_addr_t current_addr;
 
     next_ram_block(&block, &offset);
-
 
     while (true) {
         mr = block->mr;
@@ -693,7 +691,7 @@ int ram_send_block_info(QEMUFile *f)
     ram_addr_t current_addr = 0;
 
     RAMBlock *block;
-    QLIST_FOREACH(block, &ram_list.blocks, next) {
+    QTAILQ_FOREACH(block, &ram_list.blocks, next) {
         current_addr = block->offset;
         if (strncmp(block->idstr, "pc.ram", strlen(block->idstr)) == 0)
             break;
@@ -708,11 +706,11 @@ int ram_send_block_info(QEMUFile *f)
     bitmap = &ram_list.phys_dirty[current_addr > TARGET_PAGE_BITS];
     qemu_put_be32(f, bitmap_size);
     qemu_put_buffer(f, bitmap, bitmap_size);
-    current_addr = last_block->offset + last_offset;
+    current_addr = last_sent_block->offset + last_offset;
 
     // Send EOS
     qemu_put_be64(f, RAM_SAVE_FLAG_EOS);
-    last_block = block;
+    last_sent_block = block;
     last_offset = offset;
 
     return 0; // anything?
