@@ -1,6 +1,7 @@
-#include "qemu-option.h"
-#include "heca.h"
 #include <libheca.h>
+#include "qemu/timer.h"
+#include "exec/memory.h"
+#include "heca.h"
 
 #ifdef DEBUG_HECA
 #define DPRINTF(fmt, ...) \
@@ -462,7 +463,7 @@ static void print_data_structures(void)
 static inline MemoryRegion *heca_get_system_mr(void)
 {
     RAMBlock *block;
-    QLIST_FOREACH(block, &ram_list.blocks, next) {
+    QTAILQ_FOREACH(block, &ram_list.blocks, next) {
         if (strncmp(block->idstr, "pc.ram", strlen(block->idstr)) == 0)
             return block->mr; 
     }
@@ -487,7 +488,7 @@ uint64_t heca_get_system_ram_size(void)
 
 static void * touch_all_ram_worker(void *arg)
 {
-    target_phys_addr_t block_addr, block_end, addr;
+    ram_addr_t block_addr, block_end, addr;
     unsigned long long block_length;
 
     RAMBlock *block;
@@ -495,7 +496,7 @@ static void * touch_all_ram_worker(void *arg)
     
     DPRINTF("Starting to pull all pages to local node.\n");
 
-    QLIST_FOREACH(block, &ram_list.blocks, next) {
+    QTAILQ_FOREACH(block, &ram_list.blocks, next) {
         if (strncmp(block->idstr,"pc.ram",strlen(block->idstr)) == 0)
         {
             block_addr = block->mr->addr;

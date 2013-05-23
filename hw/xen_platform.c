@@ -27,13 +27,12 @@
 
 #include "hw.h"
 #include "pc.h"
-#include "pci.h"
+#include "pci/pci.h"
 #include "irq.h"
 #include "xen_common.h"
-#include "net.h"
 #include "xen_backend.h"
 #include "trace.h"
-#include "exec-memory.h"
+#include "exec/address-spaces.h"
 
 #include <xenguest.h>
 
@@ -228,18 +227,46 @@ static void platform_fixed_ioport_reset(void *opaque)
     platform_fixed_ioport_writeb(s, 0, 0);
 }
 
-const MemoryRegionPortio xen_platform_ioport[] = {
-    { 0, 16, 4, .write = platform_fixed_ioport_writel, },
-    { 0, 16, 2, .write = platform_fixed_ioport_writew, },
-    { 0, 16, 1, .write = platform_fixed_ioport_writeb, },
-    { 0, 16, 2, .read = platform_fixed_ioport_readw, },
-    { 0, 16, 1, .read = platform_fixed_ioport_readb, },
-    PORTIO_END_OF_LIST()
-};
+static uint64_t platform_fixed_ioport_read(void *opaque,
+                                           hwaddr addr,
+                                           unsigned size)
+{
+    switch (size) {
+    case 1:
+        return platform_fixed_ioport_readb(opaque, addr);
+    case 2:
+        return platform_fixed_ioport_readw(opaque, addr);
+    default:
+        return -1;
+    }
+}
+
+static void platform_fixed_ioport_write(void *opaque, hwaddr addr,
+
+                                        uint64_t val, unsigned size)
+{
+    switch (size) {
+    case 1:
+        platform_fixed_ioport_writeb(opaque, addr, val);
+        break;
+    case 2:
+        platform_fixed_ioport_writew(opaque, addr, val);
+        break;
+    case 4:
+        platform_fixed_ioport_writel(opaque, addr, val);
+        break;
+    }
+}
+
 
 static const MemoryRegionOps platform_fixed_io_ops = {
-    .old_portio = xen_platform_ioport,
-    .endianness = DEVICE_NATIVE_ENDIAN,
+    .read = platform_fixed_ioport_read,
+    .write = platform_fixed_ioport_write,
+    .impl = {
+        .min_access_size = 1,
+        .max_access_size = 4,
+    },
+    .endianness = DEVICE_LITTLE_ENDIAN,
 };
 
 static void platform_fixed_ioport_init(PCIXenPlatformState* s)
@@ -252,7 +279,8 @@ static void platform_fixed_ioport_init(PCIXenPlatformState* s)
 
 /* Xen Platform PCI Device */
 
-static uint32_t xen_platform_ioport_readb(void *opaque, uint32_t addr)
+static uint64_t xen_platform_ioport_readb(void *opaque, hwaddr addr,
+                                          unsigned int size)
 {
     if (addr == 0) {
         return platform_fixed_ioport_readb(opaque, 0);
@@ -261,30 +289,28 @@ static uint32_t xen_platform_ioport_readb(void *opaque, uint32_t addr)
     }
 }
 
-static void xen_platform_ioport_writeb(void *opaque, uint32_t addr, uint32_t val)
+static void xen_platform_ioport_writeb(void *opaque, hwaddr addr,
+                                       uint64_t val, unsigned int size)
 {
     PCIXenPlatformState *s = opaque;
 
     switch (addr) {
     case 0: /* Platform flags */
-        platform_fixed_ioport_writeb(opaque, 0, val);
+        platform_fixed_ioport_writeb(opaque, 0, (uint32_t)val);
         break;
     case 8:
-        log_writeb(s, val);
+        log_writeb(s, (uint32_t)val);
         break;
     default:
         break;
     }
 }
 
-static MemoryRegionPortio xen_pci_portio[] = {
-    { 0, 0x100, 1, .read = xen_platform_ioport_readb, },
-    { 0, 0x100, 1, .write = xen_platform_ioport_writeb, },
-    PORTIO_END_OF_LIST()
-};
-
 static const MemoryRegionOps xen_pci_io_ops = {
-    .old_portio = xen_pci_portio,
+    .read  = xen_platform_ioport_readb,
+    .write = xen_platform_ioport_writeb,
+    .impl.min_access_size = 1,
+    .impl.max_access_size = 1,
 };
 
 static void platform_ioport_bar_setup(PCIXenPlatformState *d)
@@ -292,7 +318,7 @@ static void platform_ioport_bar_setup(PCIXenPlatformState *d)
     memory_region_init_io(&d->bar, &xen_pci_io_ops, d, "xen-pci", 0x100);
 }
 
-static uint64_t platform_mmio_read(void *opaque, target_phys_addr_t addr,
+static uint64_t platform_mmio_read(void *opaque, hwaddr addr,
                                    unsigned size)
 {
     DPRINTF("Warning: attempted read from physical address "
@@ -301,7 +327,7 @@ static uint64_t platform_mmio_read(void *opaque, target_phys_addr_t addr,
     return 0;
 }
 
-static void platform_mmio_write(void *opaque, target_phys_addr_t addr,
+static void platform_mmio_write(void *opaque, hwaddr addr,
                                 uint64_t val, unsigned size)
 {
     DPRINTF("Warning: attempted write of 0x%"PRIx64" to physical "
@@ -393,7 +419,7 @@ static void xen_platform_class_init(ObjectClass *klass, void *data)
     dc->vmsd = &vmstate_xen_platform;
 }
 
-static TypeInfo xen_platform_info = {
+static const TypeInfo xen_platform_info = {
     .name          = "xen-platform",
     .parent        = TYPE_PCI_DEVICE,
     .instance_size = sizeof(PCIXenPlatformState),

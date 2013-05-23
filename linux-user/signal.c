@@ -202,46 +202,67 @@ void target_to_host_old_sigset(sigset_t *sigset,
 static inline void host_to_target_siginfo_noswap(target_siginfo_t *tinfo,
                                                  const siginfo_t *info)
 {
-    int sig;
-    sig = host_to_target_signal(info->si_signo);
+    int sig = host_to_target_signal(info->si_signo);
     tinfo->si_signo = sig;
     tinfo->si_errno = 0;
     tinfo->si_code = info->si_code;
-    if (sig == SIGILL || sig == SIGFPE || sig == SIGSEGV ||
-        sig == SIGBUS || sig == SIGTRAP) {
-        /* should never come here, but who knows. The information for
-           the target is irrelevant */
+
+    if (sig == TARGET_SIGILL || sig == TARGET_SIGFPE || sig == TARGET_SIGSEGV
+        || sig == TARGET_SIGBUS || sig == TARGET_SIGTRAP) {
+        /* Should never come here, but who knows. The information for
+           the target is irrelevant.  */
         tinfo->_sifields._sigfault._addr = 0;
-    } else if (sig == SIGIO) {
+    } else if (sig == TARGET_SIGIO) {
+        tinfo->_sifields._sigpoll._band = info->si_band;
 	tinfo->_sifields._sigpoll._fd = info->si_fd;
+    } else if (sig == TARGET_SIGCHLD) {
+        tinfo->_sifields._sigchld._pid = info->si_pid;
+        tinfo->_sifields._sigchld._uid = info->si_uid;
+        tinfo->_sifields._sigchld._status
+            = host_to_target_waitstatus(info->si_status);
+        tinfo->_sifields._sigchld._utime = info->si_utime;
+        tinfo->_sifields._sigchld._stime = info->si_stime;
     } else if (sig >= TARGET_SIGRTMIN) {
         tinfo->_sifields._rt._pid = info->si_pid;
         tinfo->_sifields._rt._uid = info->si_uid;
         /* XXX: potential problem if 64 bit */
-        tinfo->_sifields._rt._sigval.sival_ptr =
-            (abi_ulong)(unsigned long)info->si_value.sival_ptr;
+        tinfo->_sifields._rt._sigval.sival_ptr
+            = (abi_ulong)(unsigned long)info->si_value.sival_ptr;
     }
 }
 
 static void tswap_siginfo(target_siginfo_t *tinfo,
                           const target_siginfo_t *info)
 {
-    int sig;
-    sig = info->si_signo;
+    int sig = info->si_signo;
     tinfo->si_signo = tswap32(sig);
     tinfo->si_errno = tswap32(info->si_errno);
     tinfo->si_code = tswap32(info->si_code);
-    if (sig == SIGILL || sig == SIGFPE || sig == SIGSEGV ||
-        sig == SIGBUS || sig == SIGTRAP) {
-        tinfo->_sifields._sigfault._addr =
-            tswapal(info->_sifields._sigfault._addr);
-    } else if (sig == SIGIO) {
-	tinfo->_sifields._sigpoll._fd = tswap32(info->_sifields._sigpoll._fd);
+
+    if (sig == TARGET_SIGILL || sig == TARGET_SIGFPE || sig == TARGET_SIGSEGV
+        || sig == TARGET_SIGBUS || sig == TARGET_SIGTRAP) {
+        tinfo->_sifields._sigfault._addr
+            = tswapal(info->_sifields._sigfault._addr);
+    } else if (sig == TARGET_SIGIO) {
+        tinfo->_sifields._sigpoll._band
+            = tswap32(info->_sifields._sigpoll._band);
+        tinfo->_sifields._sigpoll._fd = tswap32(info->_sifields._sigpoll._fd);
+    } else if (sig == TARGET_SIGCHLD) {
+        tinfo->_sifields._sigchld._pid
+            = tswap32(info->_sifields._sigchld._pid);
+        tinfo->_sifields._sigchld._uid
+            = tswap32(info->_sifields._sigchld._uid);
+        tinfo->_sifields._sigchld._status
+            = tswap32(info->_sifields._sigchld._status);
+        tinfo->_sifields._sigchld._utime
+            = tswapal(info->_sifields._sigchld._utime);
+        tinfo->_sifields._sigchld._stime
+            = tswapal(info->_sifields._sigchld._stime);
     } else if (sig >= TARGET_SIGRTMIN) {
         tinfo->_sifields._rt._pid = tswap32(info->_sifields._rt._pid);
         tinfo->_sifields._rt._uid = tswap32(info->_sifields._rt._uid);
-        tinfo->_sifields._rt._sigval.sival_ptr =
-            tswapal(info->_sifields._rt._sigval.sival_ptr);
+        tinfo->_sifields._rt._sigval.sival_ptr
+            = tswapal(info->_sifields._rt._sigval.sival_ptr);
     }
 }
 
@@ -586,28 +607,22 @@ int do_sigaction(int sig, const struct target_sigaction *act,
             sig, act, oact);
 #endif
     if (oact) {
-        oact->_sa_handler = tswapal(k->_sa_handler);
-#if defined(TARGET_MIPS) || defined (TARGET_ALPHA)
-        oact->sa_flags = bswap32(k->sa_flags);
-#else
-        oact->sa_flags = tswapal(k->sa_flags);
-#endif
+        __put_user(k->_sa_handler, &oact->_sa_handler);
+        __put_user(k->sa_flags, &oact->sa_flags);
 #if !defined(TARGET_MIPS)
-        oact->sa_restorer = tswapal(k->sa_restorer);
+        __put_user(k->sa_restorer, &oact->sa_restorer);
 #endif
+        /* Not swapped.  */
         oact->sa_mask = k->sa_mask;
     }
     if (act) {
         /* FIXME: This is not threadsafe.  */
-        k->_sa_handler = tswapal(act->_sa_handler);
-#if defined(TARGET_MIPS) || defined (TARGET_ALPHA)
-        k->sa_flags = bswap32(act->sa_flags);
-#else
-        k->sa_flags = tswapal(act->sa_flags);
-#endif
+        __get_user(k->_sa_handler, &act->_sa_handler);
+        __get_user(k->sa_flags, &act->sa_flags);
 #if !defined(TARGET_MIPS)
-        k->sa_restorer = tswapal(act->sa_restorer);
+        __get_user(k->sa_restorer, &act->sa_restorer);
 #endif
+        /* To be swapped in target_to_host_sigset.  */
         k->sa_mask = act->sa_mask;
 
         /* we update the host linux signal state */
@@ -4563,7 +4578,7 @@ static void setup_frame(int sig, struct target_sigaction *ka,
 
     signal = current_exec_domain_sig(sig);
 
-    err |= __put_user(h2g(ka->_sa_handler), &sc->handler);
+    err |= __put_user(ka->_sa_handler, &sc->handler);
     err |= __put_user(set->sig[0], &sc->oldmask);
 #if defined(TARGET_PPC64)
     err |= __put_user(set->sig[0] >> 32, &sc->_unused[3]);
@@ -4585,7 +4600,7 @@ static void setup_frame(int sig, struct target_sigaction *ka,
 
     /* Create a stack frame for the caller of the handler.  */
     newsp = frame_addr - SIGNAL_FRAMESIZE;
-    err |= __put_user(env->gpr[1], (target_ulong *)(uintptr_t) newsp);
+    err |= put_user(env->gpr[1], newsp, target_ulong);
 
     if (err)
         goto sigsegv;
@@ -4593,7 +4608,7 @@ static void setup_frame(int sig, struct target_sigaction *ka,
     /* Set up registers for signal handler.  */
     env->gpr[1] = newsp;
     env->gpr[3] = signal;
-    env->gpr[4] = (target_ulong) h2g(sc);
+    env->gpr[4] = frame_addr + offsetof(struct target_sigframe, sctx);
     env->nip = (target_ulong) ka->_sa_handler;
     /* Signal handlers are entered in big-endian mode.  */
     env->msr &= ~MSR_LE;

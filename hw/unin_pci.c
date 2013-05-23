@@ -22,9 +22,9 @@
  * THE SOFTWARE.
  */
 #include "hw.h"
-#include "ppc_mac.h"
-#include "pci.h"
-#include "pci_host.h"
+#include "ppc/mac.h"
+#include "pci/pci.h"
+#include "pci/pci_host.h"
 
 /* debug UniNorth */
 //#define DEBUG_UNIN
@@ -111,7 +111,7 @@ static uint32_t unin_get_config_reg(uint32_t reg, uint32_t addr)
     return retval;
 }
 
-static void unin_data_write(void *opaque, target_phys_addr_t addr,
+static void unin_data_write(void *opaque, hwaddr addr,
                             uint64_t val, unsigned len)
 {
     UNINState *s = opaque;
@@ -123,7 +123,7 @@ static void unin_data_write(void *opaque, target_phys_addr_t addr,
                    val, len);
 }
 
-static uint64_t unin_data_read(void *opaque, target_phys_addr_t addr,
+static uint64_t unin_data_read(void *opaque, hwaddr addr,
                                unsigned len)
 {
     UNINState *s = opaque;

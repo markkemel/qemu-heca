@@ -22,6 +22,7 @@
  * THE SOFTWARE.
  */
 
+#ifndef TCG_TARGET_HPPA
 #define TCG_TARGET_HPPA 1
 
 #if TCG_TARGET_REG_BITS != 32
@@ -103,8 +104,6 @@ typedef enum {
 #define TCG_TARGET_HAS_ext8u_i32        0 /* and rd, rs, 0xff */
 #define TCG_TARGET_HAS_ext16u_i32       0 /* and rd, rs, 0xffff */
 
-#define TCG_TARGET_HAS_GUEST_BASE
-
 #define TCG_AREG0 TCG_REG_R17
 
 
@@ -121,3 +120,5 @@ static inline void flush_icache_range(tcg_target_ulong start,
         start += 32;
     }
 }
+
+#endif

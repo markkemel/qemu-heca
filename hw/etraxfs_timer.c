@@ -22,8 +22,8 @@
  * THE SOFTWARE.
  */
 #include "sysbus.h"
-#include "sysemu.h"
-#include "qemu-timer.h"
+#include "sysemu/sysemu.h"
+#include "qemu/timer.h"
 #include "ptimer.h"
 
 #define D(x)
@@ -75,7 +75,7 @@ struct etrax_timer {
 };
 
 static uint64_t
-timer_read(void *opaque, target_phys_addr_t addr, unsigned int size)
+timer_read(void *opaque, hwaddr addr, unsigned int size)
 {
     struct etrax_timer *t = opaque;
     uint32_t r = 0;
@@ -242,7 +242,7 @@ static inline void timer_watchdog_update(struct etrax_timer *t, uint32_t value)
 }
 
 static void
-timer_write(void *opaque, target_phys_addr_t addr,
+timer_write(void *opaque, hwaddr addr,
             uint64_t val64, unsigned int size)
 {
     struct etrax_timer *t = opaque;
@@ -336,7 +336,7 @@ static void etraxfs_timer_class_init(ObjectClass *klass, void *data)
     sdc->init = etraxfs_timer_init;
 }
 
-static TypeInfo etraxfs_timer_info = {
+static const TypeInfo etraxfs_timer_info = {
     .name          = "etraxfs,timer",
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof (struct etrax_timer),

@@ -17,7 +17,7 @@
  */
 
 #include "sysbus.h"
-#include "qemu-timer.h"
+#include "qemu/timer.h"
 
 #ifdef CADENCE_TTC_ERR_DEBUG
 #define DB_PRINT(...) do { \
@@ -76,7 +76,7 @@ static void cadence_timer_update(CadenceTimerState *s)
 }
 
 static CadenceTimerState *cadence_timer_from_addr(void *opaque,
-                                        target_phys_addr_t offset)
+                                        hwaddr offset)
 {
     unsigned int index;
     CadenceTTCState *s = (CadenceTTCState *)opaque;
@@ -224,7 +224,7 @@ static void cadence_timer_tick(void *opaque)
     cadence_timer_run(s);
 }
 
-static uint32_t cadence_ttc_read_imp(void *opaque, target_phys_addr_t offset)
+static uint32_t cadence_ttc_read_imp(void *opaque, hwaddr offset)
 {
     CadenceTimerState *s = cadence_timer_from_addr(opaque, offset);
     uint32_t value;
@@ -274,6 +274,7 @@ static uint32_t cadence_ttc_read_imp(void *opaque, target_phys_addr_t offset)
         /* cleared after read */
         value = s->reg_intr;
         s->reg_intr = 0;
+        cadence_timer_update(s);
         return value;
 
     case 0x60: /* interrupt enable */
@@ -296,21 +297,21 @@ static uint32_t cadence_ttc_read_imp(void *opaque, target_phys_addr_t offset)
     }
 }
 
-static uint64_t cadence_ttc_read(void *opaque, target_phys_addr_t offset,
+static uint64_t cadence_ttc_read(void *opaque, hwaddr offset,
     unsigned size)
 {
     uint32_t ret = cadence_ttc_read_imp(opaque, offset);
 
-    DB_PRINT("addr: %08x data: %08x\n", offset, ret);
+    DB_PRINT("addr: %08x data: %08x\n", (unsigned)offset, (unsigned)ret);
     return ret;
 }
 
-static void cadence_ttc_write(void *opaque, target_phys_addr_t offset,
+static void cadence_ttc_write(void *opaque, hwaddr offset,
         uint64_t value, unsigned size)
 {
     CadenceTimerState *s = cadence_timer_from_addr(opaque, offset);
 
-    DB_PRINT("addr: %08x data %08x\n", offset, (unsigned)value);
+    DB_PRINT("addr: %08x data %08x\n", (unsigned)offset, (unsigned)value);
 
     cadence_timer_sync(s);
 
@@ -355,7 +356,6 @@ static void cadence_ttc_write(void *opaque, target_phys_addr_t offset,
     case 0x54: /* interrupt register */
     case 0x58:
     case 0x5c:
-        s->reg_intr &= (~value & 0xfff);
         break;
 
     case 0x60: /* interrupt enable */
@@ -474,7 +474,7 @@ static void cadence_ttc_class_init(ObjectClass *klass, void *data)
     dc->vmsd = &vmstate_cadence_ttc;
 }
 
-static TypeInfo cadence_ttc_info = {
+static const TypeInfo cadence_ttc_info = {
     .name  = "cadence_ttc",
     .parent = TYPE_SYS_BUS_DEVICE,
     .instance_size  = sizeof(CadenceTTCState),

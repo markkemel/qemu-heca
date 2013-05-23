@@ -15,12 +15,7 @@
 #include "hw/hw.h"
 #include "hw/boards.h"
 
-static void machine_none_init(ram_addr_t ram_size,
-                              const char *boot_device,
-                              const char *kernel_filename,
-                              const char *kernel_cmdline,
-                              const char *initrd_filename,
-                              const char *cpu_model)
+static void machine_none_init(QEMUMachineInitArgs *args)
 {
 }
 
@@ -29,6 +24,7 @@ static QEMUMachine machine_none = {
     .desc = "empty machine",
     .init = machine_none_init,
     .max_cpus = 0,
+    DEFAULT_MACHINE_OPTIONS,
 };
 
 static void register_machines(void)

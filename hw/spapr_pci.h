@@ -23,8 +23,8 @@
 #if !defined(__HW_SPAPR_PCI_H__)
 #define __HW_SPAPR_PCI_H__
 
-#include "hw/pci.h"
-#include "hw/pci_host.h"
+#include "hw/pci/pci.h"
+#include "hw/pci/pci_host.h"
 #include "hw/xics.h"
 
 #define SPAPR_MSIX_MAX_DEVS 32
@@ -37,13 +37,14 @@
 typedef struct sPAPRPHBState {
     PCIHostState parent_obj;
 
+    int32_t index;
     uint64_t buid;
     char *busname;
     char *dtbusname;
 
     MemoryRegion memspace, iospace;
-    target_phys_addr_t mem_win_addr, mem_win_size, io_win_addr, io_win_size;
-    target_phys_addr_t msi_win_addr;
+    hwaddr mem_win_addr, mem_win_size, io_win_addr, io_win_size;
+    hwaddr msi_win_addr;
     MemoryRegion memwindow, iowindow, msiwindow;
 
     uint32_t dma_liobn;
@@ -64,18 +65,25 @@ typedef struct sPAPRPHBState {
     QLIST_ENTRY(sPAPRPHBState) list;
 } sPAPRPHBState;
 
+#define SPAPR_PCI_BASE_BUID          0x800000020000000ULL
+
+#define SPAPR_PCI_WINDOW_BASE        0x10000000000ULL
+#define SPAPR_PCI_WINDOW_SPACING     0x1000000000ULL
+#define SPAPR_PCI_MMIO_WIN_OFF       0xA0000000
+#define SPAPR_PCI_MMIO_WIN_SIZE      0x20000000
+#define SPAPR_PCI_IO_WIN_OFF         0x80000000
+#define SPAPR_PCI_IO_WIN_SIZE        0x10000
+#define SPAPR_PCI_MSI_WIN_OFF        0x90000000
+
+#define SPAPR_PCI_MEM_WIN_BUS_OFFSET 0x80000000ULL
+
 static inline qemu_irq spapr_phb_lsi_qirq(struct sPAPRPHBState *phb, int pin)
 {
     return xics_get_qirq(spapr->icp, phb->lsi_table[pin].irq);
 }
 
-#define SPAPR_PCI_MEM_WIN_BUS_OFFSET 0x80000000ULL
-#define SPAPR_PCI_IO_WIN_SIZE        0x10000
-
-void spapr_create_phb(sPAPREnvironment *spapr,
-                      const char *busname, uint64_t buid,
-                      uint64_t mem_win_addr, uint64_t mem_win_size,
-                      uint64_t io_win_addr, uint64_t msi_win_addr);
+PCIHostState *spapr_create_phb(sPAPREnvironment *spapr, int index,
+                               const char *busname);
 
 int spapr_populate_pci_dt(sPAPRPHBState *phb,
                           uint32_t xics_phandle,

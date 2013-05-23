@@ -138,7 +138,7 @@ static void mv88w8618_audio_clock_update(mv88w8618_audio_state *s)
     wm8750_set_bclk_in(s->wm, rate);
 }
 
-static uint64_t mv88w8618_audio_read(void *opaque, target_phys_addr_t offset,
+static uint64_t mv88w8618_audio_read(void *opaque, hwaddr offset,
                                     unsigned size)
 {
     mv88w8618_audio_state *s = opaque;
@@ -164,7 +164,7 @@ static uint64_t mv88w8618_audio_read(void *opaque, target_phys_addr_t offset,
     }
 }
 
-static void mv88w8618_audio_write(void *opaque, target_phys_addr_t offset,
+static void mv88w8618_audio_write(void *opaque, hwaddr offset,
                                   uint64_t value, unsigned size)
 {
     mv88w8618_audio_state *s = opaque;
@@ -222,7 +222,7 @@ static void mv88w8618_audio_write(void *opaque, target_phys_addr_t offset,
 static void mv88w8618_audio_reset(DeviceState *d)
 {
     mv88w8618_audio_state *s = FROM_SYSBUS(mv88w8618_audio_state,
-                                           sysbus_from_qdev(d));
+                                           SYS_BUS_DEVICE(d));
 
     s->playback_mode = 0;
     s->status = 0;
@@ -288,7 +288,7 @@ static void mv88w8618_audio_class_init(ObjectClass *klass, void *data)
     dc->props = mv88w8618_audio_properties;
 }
 
-static TypeInfo mv88w8618_audio_info = {
+static const TypeInfo mv88w8618_audio_info = {
     .name          = "mv88w8618_audio",
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(mv88w8618_audio_state),

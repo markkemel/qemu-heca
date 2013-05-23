@@ -78,7 +78,7 @@ enum {
 };
 
 /* Note: on sparc, the lance 16 bit bus is swapped */
-void ledma_memory_read(void *opaque, target_phys_addr_t addr,
+void ledma_memory_read(void *opaque, hwaddr addr,
                        uint8_t *buf, int len, int do_bswap)
 {
     DMAState *s = opaque;
@@ -98,7 +98,7 @@ void ledma_memory_read(void *opaque, target_phys_addr_t addr,
     }
 }
 
-void ledma_memory_write(void *opaque, target_phys_addr_t addr,
+void ledma_memory_write(void *opaque, hwaddr addr,
                         uint8_t *buf, int len, int do_bswap)
 {
     DMAState *s = opaque;
@@ -165,7 +165,7 @@ void espdma_memory_write(void *opaque, uint8_t *buf, int len)
     s->dmaregs[1] += len;
 }
 
-static uint64_t dma_mem_read(void *opaque, target_phys_addr_t addr,
+static uint64_t dma_mem_read(void *opaque, hwaddr addr,
                              unsigned size)
 {
     DMAState *s = opaque;
@@ -182,7 +182,7 @@ static uint64_t dma_mem_read(void *opaque, target_phys_addr_t addr,
     return s->dmaregs[saddr];
 }
 
-static void dma_mem_write(void *opaque, target_phys_addr_t addr,
+static void dma_mem_write(void *opaque, hwaddr addr,
                           uint64_t val, unsigned size)
 {
     DMAState *s = opaque;
@@ -300,7 +300,7 @@ static void sparc32_dma_class_init(ObjectClass *klass, void *data)
     dc->props = sparc32_dma_properties;
 }
 
-static TypeInfo sparc32_dma_info = {
+static const TypeInfo sparc32_dma_info = {
     .name          = "sparc32_dma",
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(DMAState),

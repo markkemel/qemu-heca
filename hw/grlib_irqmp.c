@@ -109,7 +109,7 @@ void grlib_irqmp_ack(DeviceState *dev, int intno)
 
     assert(dev != NULL);
 
-    sdev = sysbus_from_qdev(dev);
+    sdev = SYS_BUS_DEVICE(dev);
     assert(sdev != NULL);
 
     irqmp = FROM_SYSBUS(typeof(*irqmp), sdev);
@@ -138,7 +138,7 @@ void grlib_irqmp_set_irq(void *opaque, int irq, int level)
 
     assert(opaque != NULL);
 
-    irqmp = FROM_SYSBUS(typeof(*irqmp), sysbus_from_qdev(opaque));
+    irqmp = FROM_SYSBUS(typeof(*irqmp), SYS_BUS_DEVICE(opaque));
     assert(irqmp != NULL);
 
     s = irqmp->state;
@@ -162,7 +162,7 @@ void grlib_irqmp_set_irq(void *opaque, int irq, int level)
     }
 }
 
-static uint64_t grlib_irqmp_read(void *opaque, target_phys_addr_t addr,
+static uint64_t grlib_irqmp_read(void *opaque, hwaddr addr,
                                  unsigned size)
 {
     IRQMP      *irqmp = opaque;
@@ -226,7 +226,7 @@ static uint64_t grlib_irqmp_read(void *opaque, target_phys_addr_t addr,
     return 0;
 }
 
-static void grlib_irqmp_write(void *opaque, target_phys_addr_t addr,
+static void grlib_irqmp_write(void *opaque, hwaddr addr,
                               uint64_t value, unsigned size)
 {
     IRQMP      *irqmp = opaque;
@@ -370,7 +370,7 @@ static void grlib_irqmp_class_init(ObjectClass *klass, void *data)
     dc->props = grlib_irqmp_properties;
 }
 
-static TypeInfo grlib_irqmp_info = {
+static const TypeInfo grlib_irqmp_info = {
     .name          = "grlib,irqmp",
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(IRQMP),

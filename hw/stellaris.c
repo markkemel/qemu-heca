@@ -11,11 +11,11 @@
 #include "ssi.h"
 #include "arm-misc.h"
 #include "devices.h"
-#include "qemu-timer.h"
+#include "qemu/timer.h"
 #include "i2c.h"
-#include "net.h"
+#include "net/net.h"
 #include "boards.h"
-#include "exec-memory.h"
+#include "exec/address-spaces.h"
 
 #define GPIO_A 0
 #define GPIO_B 1
@@ -141,7 +141,7 @@ static void gptm_tick(void *opaque)
     gptm_update_irq(s);
 }
 
-static uint64_t gptm_read(void *opaque, target_phys_addr_t offset,
+static uint64_t gptm_read(void *opaque, hwaddr offset,
                           unsigned size)
 {
     gptm_state *s = (gptm_state *)opaque;
@@ -190,7 +190,7 @@ static uint64_t gptm_read(void *opaque, target_phys_addr_t offset,
     }
 }
 
-static void gptm_write(void *opaque, target_phys_addr_t offset,
+static void gptm_write(void *opaque, hwaddr offset,
                        uint64_t value, unsigned size)
 {
     gptm_state *s = (gptm_state *)opaque;
@@ -410,7 +410,7 @@ static int ssys_board_class(const ssys_state *s)
     }
 }
 
-static uint64_t ssys_read(void *opaque, target_phys_addr_t offset,
+static uint64_t ssys_read(void *opaque, hwaddr offset,
                           unsigned size)
 {
     ssys_state *s = (ssys_state *)opaque;
@@ -515,7 +515,7 @@ static void ssys_calculate_system_clock(ssys_state *s)
     }
 }
 
-static void ssys_write(void *opaque, target_phys_addr_t offset,
+static void ssys_write(void *opaque, hwaddr offset,
                        uint64_t value, unsigned size)
 {
     ssys_state *s = (ssys_state *)opaque;
@@ -701,7 +701,7 @@ typedef struct {
 #define STELLARIS_I2C_MCS_IDLE    0x20
 #define STELLARIS_I2C_MCS_BUSBSY  0x40
 
-static uint64_t stellaris_i2c_read(void *opaque, target_phys_addr_t offset,
+static uint64_t stellaris_i2c_read(void *opaque, hwaddr offset,
                                    unsigned size)
 {
     stellaris_i2c_state *s = (stellaris_i2c_state *)opaque;
@@ -738,7 +738,7 @@ static void stellaris_i2c_update(stellaris_i2c_state *s)
     qemu_set_irq(s->irq, level);
 }
 
-static void stellaris_i2c_write(void *opaque, target_phys_addr_t offset,
+static void stellaris_i2c_write(void *opaque, hwaddr offset,
                                 uint64_t value, unsigned size)
 {
     stellaris_i2c_state *s = (stellaris_i2c_state *)opaque;
@@ -989,7 +989,7 @@ static void stellaris_adc_reset(stellaris_adc_state *s)
     }
 }
 
-static uint64_t stellaris_adc_read(void *opaque, target_phys_addr_t offset,
+static uint64_t stellaris_adc_read(void *opaque, hwaddr offset,
                                    unsigned size)
 {
     stellaris_adc_state *s = (stellaris_adc_state *)opaque;
@@ -1037,7 +1037,7 @@ static uint64_t stellaris_adc_read(void *opaque, target_phys_addr_t offset,
     }
 }
 
-static void stellaris_adc_write(void *opaque, target_phys_addr_t offset,
+static void stellaris_adc_write(void *opaque, hwaddr offset,
                                 uint64_t value, unsigned size)
 {
     stellaris_adc_state *s = (stellaris_adc_state *)opaque;
@@ -1286,8 +1286,8 @@ static void stellaris_init(const char *kernel_filename, const char *cpu_model,
         enet = qdev_create(NULL, "stellaris_enet");
         qdev_set_nic_properties(enet, &nd_table[0]);
         qdev_init_nofail(enet);
-        sysbus_mmio_map(sysbus_from_qdev(enet), 0, 0x40048000);
-        sysbus_connect_irq(sysbus_from_qdev(enet), 0, pic[42]);
+        sysbus_mmio_map(SYS_BUS_DEVICE(enet), 0, 0x40048000);
+        sysbus_connect_irq(SYS_BUS_DEVICE(enet), 0, pic[42]);
     }
     if (board->peripherals & BP_GAMEPAD) {
         qemu_irq gpad_irq[5];
@@ -1313,19 +1313,17 @@ static void stellaris_init(const char *kernel_filename, const char *cpu_model,
 }
 
 /* FIXME: Figure out how to generate these from stellaris_boards.  */
-static void lm3s811evb_init(ram_addr_t ram_size,
-                     const char *boot_device,
-                     const char *kernel_filename, const char *kernel_cmdline,
-                     const char *initrd_filename, const char *cpu_model)
+static void lm3s811evb_init(QEMUMachineInitArgs *args)
 {
+    const char *cpu_model = args->cpu_model;
+    const char *kernel_filename = args->kernel_filename;
     stellaris_init(kernel_filename, cpu_model, &stellaris_boards[0]);
 }
 
-static void lm3s6965evb_init(ram_addr_t ram_size,
-                     const char *boot_device,
-                     const char *kernel_filename, const char *kernel_cmdline,
-                     const char *initrd_filename, const char *cpu_model)
+static void lm3s6965evb_init(QEMUMachineInitArgs *args)
 {
+    const char *cpu_model = args->cpu_model;
+    const char *kernel_filename = args->kernel_filename;
     stellaris_init(kernel_filename, cpu_model, &stellaris_boards[1]);
 }
 
@@ -1333,12 +1331,14 @@ static QEMUMachine lm3s811evb_machine = {
     .name = "lm3s811evb",
     .desc = "Stellaris LM3S811EVB",
     .init = lm3s811evb_init,
+    DEFAULT_MACHINE_OPTIONS,
 };
 
 static QEMUMachine lm3s6965evb_machine = {
     .name = "lm3s6965evb",
     .desc = "Stellaris LM3S6965EVB",
     .init = lm3s6965evb_init,
+    DEFAULT_MACHINE_OPTIONS,
 };
 
 static void stellaris_machine_init(void)
@@ -1356,7 +1356,7 @@ static void stellaris_i2c_class_init(ObjectClass *klass, void *data)
     sdc->init = stellaris_i2c_init;
 }
 
-static TypeInfo stellaris_i2c_info = {
+static const TypeInfo stellaris_i2c_info = {
     .name          = "stellaris-i2c",
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(stellaris_i2c_state),
@@ -1370,7 +1370,7 @@ static void stellaris_gptm_class_init(ObjectClass *klass, void *data)
     sdc->init = stellaris_gptm_init;
 }
 
-static TypeInfo stellaris_gptm_info = {
+static const TypeInfo stellaris_gptm_info = {
     .name          = "stellaris-gptm",
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(gptm_state),
@@ -1384,7 +1384,7 @@ static void stellaris_adc_class_init(ObjectClass *klass, void *data)
     sdc->init = stellaris_adc_init;
 }
 
-static TypeInfo stellaris_adc_info = {
+static const TypeInfo stellaris_adc_info = {
     .name          = "stellaris-adc",
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(stellaris_adc_state),

@@ -29,13 +29,13 @@ do { printf("scsi-disk: " fmt , ## __VA_ARGS__); } while (0)
 #endif
 
 #include "qemu-common.h"
-#include "qemu-error.h"
+#include "qemu/error-report.h"
 #include "scsi.h"
 #include "scsi-defs.h"
-#include "sysemu.h"
-#include "blockdev.h"
+#include "sysemu/sysemu.h"
+#include "sysemu/blockdev.h"
 #include "hw/block-common.h"
-#include "dma.h"
+#include "sysemu/dma.h"
 
 #ifdef __linux
 #include <scsi/sg.h>
@@ -85,9 +85,7 @@ static void scsi_free_request(SCSIRequest *req)
 {
     SCSIDiskReq *r = DO_UPCAST(SCSIDiskReq, req, req);
 
-    if (r->iov.iov_base) {
-        qemu_vfree(r->iov.iov_base);
-    }
+    qemu_vfree(r->iov.iov_base);
 }
 
 /* Helper function for command completion with sense.  */
@@ -652,7 +650,6 @@ static int scsi_disk_emulate_inquiry(SCSIRequest *req, uint8_t *outbuf)
     if (buflen > SCSI_MAX_INQUIRY_LEN) {
         buflen = SCSI_MAX_INQUIRY_LEN;
     }
-    memset(outbuf, 0, buflen);
 
     outbuf[0] = s->qdev.type & 0x1f;
     outbuf[1] = (s->features & (1 << SCSI_DISK_F_REMOVABLE)) ? 0x80 : 0;
@@ -1388,6 +1385,7 @@ invalid_param_len:
 
 static void scsi_disk_emulate_mode_select(SCSIDiskReq *r, uint8_t *inbuf)
 {
+    SCSIDiskState *s = DO_UPCAST(SCSIDiskState, qdev, r->req.dev);
     uint8_t *p = inbuf;
     int cmd = r->req.cmd.buf[0];
     int len = r->req.cmd.xfer;
@@ -1424,6 +1422,14 @@ static void scsi_disk_emulate_mode_select(SCSIDiskReq *r, uint8_t *inbuf)
             return;
         }
     }
+    if (!bdrv_enable_write_cache(s->qdev.conf.bs)) {
+        /* The request is used as the AIO opaque value, so add a ref.  */
+        scsi_req_ref(&r->req);
+        bdrv_acct_start(s->qdev.conf.bs, &r->acct, 0, BDRV_ACCT_FLUSH);
+        r->req.aiocb = bdrv_aio_flush(s->qdev.conf.bs, scsi_aio_complete, r);
+        return;
+    }
+
     scsi_req_complete(&r->req, GOOD);
     return;
 
@@ -1596,24 +1602,26 @@ static int32_t scsi_disk_emulate_command(SCSIRequest *req, uint8_t *buf)
         break;
     }
 
+    /*
+     * FIXME: we shouldn't return anything bigger than 4k, but the code
+     * requires the buffer to be as big as req->cmd.xfer in several
+     * places.  So, do not allow CDBs with a very large ALLOCATION
+     * LENGTH.  The real fix would be to modify scsi_read_data and
+     * dma_buf_read, so that they return data beyond the buflen
+     * as all zeros.
+     */
+    if (req->cmd.xfer > 65536) {
+        goto illegal_request;
+    }
+    r->buflen = MAX(4096, req->cmd.xfer);
+
     if (!r->iov.iov_base) {
-        /*
-         * FIXME: we shouldn't return anything bigger than 4k, but the code
-         * requires the buffer to be as big as req->cmd.xfer in several
-         * places.  So, do not allow CDBs with a very large ALLOCATION
-         * LENGTH.  The real fix would be to modify scsi_read_data and
-         * dma_buf_read, so that they return data beyond the buflen
-         * as all zeros.
-         */
-        if (req->cmd.xfer > 65536) {
-            goto illegal_request;
-        }
-        r->buflen = MAX(4096, req->cmd.xfer);
         r->iov.iov_base = qemu_blockalign(s->qdev.conf.bs, r->buflen);
     }
 
     buflen = req->cmd.xfer;
     outbuf = r->iov.iov_base;
+    memset(outbuf, 0, r->buflen);
     switch (req->cmd.buf[0]) {
     case TEST_UNIT_READY:
         assert(!s->tray_open && bdrv_is_inserted(s->qdev.conf.bs));
@@ -1672,7 +1680,7 @@ static int32_t scsi_disk_emulate_command(SCSIRequest *req, uint8_t *buf)
         bdrv_get_geometry(s->qdev.conf.bs, &nb_sectors);
         if (!nb_sectors) {
             scsi_check_condition(r, SENSE_CODE(LUN_NOT_READY));
-            return -1;
+            return 0;
         }
         if ((req->cmd.buf[8] & 1) == 0 && req->cmd.lba) {
             goto illegal_request;
@@ -1694,12 +1702,14 @@ static int32_t scsi_disk_emulate_command(SCSIRequest *req, uint8_t *buf)
         outbuf[5] = 0;
         outbuf[6] = s->qdev.blocksize >> 8;
         outbuf[7] = 0;
-        buflen = 8;
         break;
     case REQUEST_SENSE:
         /* Just return "NO SENSE".  */
         buflen = scsi_build_sense(NULL, 0, outbuf, r->buflen,
                                   (req->cmd.buf[1] & 1) == 0);
+        if (buflen < 0) {
+            goto illegal_request;
+        }
         break;
     case MECHANISM_STATUS:
         buflen = scsi_emulate_mechanism_status(s, outbuf);
@@ -1739,7 +1749,7 @@ static int32_t scsi_disk_emulate_command(SCSIRequest *req, uint8_t *buf)
             bdrv_get_geometry(s->qdev.conf.bs, &nb_sectors);
             if (!nb_sectors) {
                 scsi_check_condition(r, SENSE_CODE(LUN_NOT_READY));
-                return -1;
+                return 0;
             }
             if ((req->cmd.buf[14] & 1) == 0 && req->cmd.lba) {
                 goto illegal_request;
@@ -1770,7 +1780,6 @@ static int32_t scsi_disk_emulate_command(SCSIRequest *req, uint8_t *buf)
             }
 
             /* Protection, exponent and lowest lba field left blank. */
-            buflen = req->cmd.xfer;
             break;
         }
         DPRINTF("Unsupported Service Action In\n");
@@ -1827,7 +1836,7 @@ static int32_t scsi_disk_emulate_command(SCSIRequest *req, uint8_t *buf)
         return 0;
     }
     assert(!r->req.aiocb);
-    r->iov.iov_len = MIN(buflen, req->cmd.xfer);
+    r->iov.iov_len = MIN(r->buflen, req->cmd.xfer);
     if (r->iov.iov_len == 0) {
         scsi_req_complete(&r->req, GOOD);
     }
@@ -1962,7 +1971,6 @@ static void scsi_disk_resize_cb(void *opaque)
      * direct-access devices.
      */
     if (s->qdev.type == TYPE_DISK) {
-        scsi_device_set_ua(&s->qdev, SENSE_CODE(CAPACITY_CHANGED));
         scsi_device_report_change(&s->qdev, SENSE_CODE(CAPACITY_CHANGED));
     }
 }
@@ -2379,7 +2387,7 @@ static void scsi_hd_class_initfn(ObjectClass *klass, void *data)
     dc->vmsd  = &vmstate_scsi_disk_state;
 }
 
-static TypeInfo scsi_hd_info = {
+static const TypeInfo scsi_hd_info = {
     .name          = "scsi-hd",
     .parent        = TYPE_SCSI_DEVICE,
     .instance_size = sizeof(SCSIDiskState),
@@ -2408,7 +2416,7 @@ static void scsi_cd_class_initfn(ObjectClass *klass, void *data)
     dc->vmsd  = &vmstate_scsi_disk_state;
 }
 
-static TypeInfo scsi_cd_info = {
+static const TypeInfo scsi_cd_info = {
     .name          = "scsi-cd",
     .parent        = TYPE_SCSI_DEVICE,
     .instance_size = sizeof(SCSIDiskState),
@@ -2437,7 +2445,7 @@ static void scsi_block_class_initfn(ObjectClass *klass, void *data)
     dc->vmsd  = &vmstate_scsi_disk_state;
 }
 
-static TypeInfo scsi_block_info = {
+static const TypeInfo scsi_block_info = {
     .name          = "scsi-block",
     .parent        = TYPE_SCSI_DEVICE,
     .instance_size = sizeof(SCSIDiskState),
@@ -2471,7 +2479,7 @@ static void scsi_disk_class_initfn(ObjectClass *klass, void *data)
     dc->vmsd  = &vmstate_scsi_disk_state;
 }
 
-static TypeInfo scsi_disk_info = {
+static const TypeInfo scsi_disk_info = {
     .name          = "scsi-disk",
     .parent        = TYPE_SCSI_DEVICE,
     .instance_size = sizeof(SCSIDiskState),

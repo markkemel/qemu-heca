@@ -8,8 +8,9 @@
  */
 
 #include "sysbus.h"
-#include "console.h"
+#include "ui/console.h"
 #include "framebuffer.h"
+#include "ui/pixel_ops.h"
 
 #define PL110_CR_EN   0x001
 #define PL110_CR_BGR  0x100
@@ -108,8 +109,6 @@ static const unsigned char *idregs[] = {
     pl110_versatile_id,
     pl111_id
 };
-
-#include "pixel_ops.h"
 
 #define BITS 8
 #include "pl110_template.h"
@@ -239,7 +238,7 @@ static void pl110_update_display(void *opaque)
                                fn, s->palette,
                                &first, &last);
     if (first >= 0) {
-        dpy_update(s->ds, 0, first, s->cols, last - first + 1);
+        dpy_gfx_update(s->ds, 0, first, s->cols, last - first + 1);
     }
     s->invalidate = 0;
 }
@@ -305,7 +304,7 @@ static void pl110_update(pl110_state *s)
   /* TODO: Implement interrupts.  */
 }
 
-static uint64_t pl110_read(void *opaque, target_phys_addr_t offset,
+static uint64_t pl110_read(void *opaque, hwaddr offset,
                            unsigned size)
 {
     pl110_state *s = (pl110_state *)opaque;
@@ -349,12 +348,13 @@ static uint64_t pl110_read(void *opaque, target_phys_addr_t offset,
     case 12: /* LCDLPCURR */
         return s->lpbase;
     default:
-        hw_error("pl110_read: Bad offset %x\n", (int)offset);
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "pl110_read: Bad offset %x\n", (int)offset);
         return 0;
     }
 }
 
-static void pl110_write(void *opaque, target_phys_addr_t offset,
+static void pl110_write(void *opaque, hwaddr offset,
                         uint64_t val, unsigned size)
 {
     pl110_state *s = (pl110_state *)opaque;
@@ -417,7 +417,8 @@ static void pl110_write(void *opaque, target_phys_addr_t offset,
         pl110_update(s);
         break;
     default:
-        hw_error("pl110_write: Bad offset %x\n", (int)offset);
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "pl110_write: Bad offset %x\n", (int)offset);
     }
 }
 
@@ -479,7 +480,7 @@ static void pl110_class_init(ObjectClass *klass, void *data)
     dc->vmsd = &vmstate_pl110;
 }
 
-static TypeInfo pl110_info = {
+static const TypeInfo pl110_info = {
     .name          = "pl110",
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(pl110_state),
@@ -496,7 +497,7 @@ static void pl110_versatile_class_init(ObjectClass *klass, void *data)
     dc->vmsd = &vmstate_pl110;
 }
 
-static TypeInfo pl110_versatile_info = {
+static const TypeInfo pl110_versatile_info = {
     .name          = "pl110_versatile",
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(pl110_state),
@@ -513,7 +514,7 @@ static void pl111_class_init(ObjectClass *klass, void *data)
     dc->vmsd = &vmstate_pl110;
 }
 
-static TypeInfo pl111_info = {
+static const TypeInfo pl111_info = {
     .name          = "pl111",
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(pl110_state),

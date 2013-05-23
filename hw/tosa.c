@@ -17,13 +17,13 @@
 #include "devices.h"
 #include "sharpsl.h"
 #include "pcmcia.h"
-#include "block.h"
+#include "block/block.h"
 #include "boards.h"
 #include "i2c.h"
 #include "ssi.h"
-#include "blockdev.h"
+#include "sysemu/blockdev.h"
 #include "sysbus.h"
-#include "exec-memory.h"
+#include "exec/address-spaces.h"
 
 #define TOSA_RAM    0x04000000
 #define TOSA_ROM	0x00800000
@@ -205,11 +205,12 @@ static struct arm_boot_info tosa_binfo = {
     .ram_size = 0x04000000,
 };
 
-static void tosa_init(ram_addr_t ram_size,
-                const char *boot_device,
-                const char *kernel_filename, const char *kernel_cmdline,
-                const char *initrd_filename, const char *cpu_model)
+static void tosa_init(QEMUMachineInitArgs *args)
 {
+    const char *cpu_model = args->cpu_model;
+    const char *kernel_filename = args->kernel_filename;
+    const char *kernel_cmdline = args->kernel_cmdline;
+    const char *initrd_filename = args->initrd_filename;
     MemoryRegion *address_space_mem = get_system_memory();
     MemoryRegion *rom = g_new(MemoryRegion, 1);
     PXA2xxState *mpu;
@@ -250,6 +251,7 @@ static QEMUMachine tosapda_machine = {
     .name = "tosa",
     .desc = "Tosa PDA (PXA255)",
     .init = tosa_init,
+    DEFAULT_MACHINE_OPTIONS,
 };
 
 static void tosapda_machine_init(void)
@@ -269,7 +271,7 @@ static void tosa_dac_class_init(ObjectClass *klass, void *data)
     k->send = tosa_dac_send;
 }
 
-static TypeInfo tosa_dac_info = {
+static const TypeInfo tosa_dac_info = {
     .name          = "tosa_dac",
     .parent        = TYPE_I2C_SLAVE,
     .instance_size = sizeof(TosaDACState),
@@ -284,7 +286,7 @@ static void tosa_ssp_class_init(ObjectClass *klass, void *data)
     k->transfer = tosa_ssp_tansfer;
 }
 
-static TypeInfo tosa_ssp_info = {
+static const TypeInfo tosa_ssp_info = {
     .name          = "tosa-ssp",
     .parent        = TYPE_SSI_SLAVE,
     .instance_size = sizeof(SSISlave),

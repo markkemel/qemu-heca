@@ -119,7 +119,7 @@ static inline uint32_t pxa2xx_pic_highest(PXA2xxPICState *s) {
     return ichp;
 }
 
-static uint64_t pxa2xx_pic_mem_read(void *opaque, target_phys_addr_t offset,
+static uint64_t pxa2xx_pic_mem_read(void *opaque, hwaddr offset,
                                     unsigned size)
 {
     PXA2xxPICState *s = (PXA2xxPICState *) opaque;
@@ -159,7 +159,7 @@ static uint64_t pxa2xx_pic_mem_read(void *opaque, target_phys_addr_t offset,
     }
 }
 
-static void pxa2xx_pic_mem_write(void *opaque, target_phys_addr_t offset,
+static void pxa2xx_pic_mem_write(void *opaque, hwaddr offset,
                                  uint64_t value, unsigned size)
 {
     PXA2xxPICState *s = (PXA2xxPICState *) opaque;
@@ -257,11 +257,11 @@ static int pxa2xx_pic_post_load(void *opaque, int version_id)
     return 0;
 }
 
-DeviceState *pxa2xx_pic_init(target_phys_addr_t base, ARMCPU *cpu)
+DeviceState *pxa2xx_pic_init(hwaddr base, ARMCPU *cpu)
 {
     CPUARMState *env = &cpu->env;
     DeviceState *dev = qdev_create(NULL, "pxa2xx_pic");
-    PXA2xxPICState *s = FROM_SYSBUS(PXA2xxPICState, sysbus_from_qdev(dev));
+    PXA2xxPICState *s = FROM_SYSBUS(PXA2xxPICState, SYS_BUS_DEVICE(dev));
 
     s->cpu = cpu;
 
@@ -279,8 +279,8 @@ DeviceState *pxa2xx_pic_init(target_phys_addr_t base, ARMCPU *cpu)
     /* Enable IC memory-mapped registers access.  */
     memory_region_init_io(&s->iomem, &pxa2xx_pic_ops, s,
                           "pxa2xx-pic", 0x00100000);
-    sysbus_init_mmio(sysbus_from_qdev(dev), &s->iomem);
-    sysbus_mmio_map(sysbus_from_qdev(dev), 0, base);
+    sysbus_init_mmio(SYS_BUS_DEVICE(dev), &s->iomem);
+    sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, base);
 
     /* Enable IC coprocessor access.  */
     define_arm_cp_regs_with_opaque(arm_env_get_cpu(env), pxa_pic_cp_reginfo, s);
@@ -319,7 +319,7 @@ static void pxa2xx_pic_class_init(ObjectClass *klass, void *data)
     dc->vmsd = &vmstate_pxa2xx_pic_regs;
 }
 
-static TypeInfo pxa2xx_pic_info = {
+static const TypeInfo pxa2xx_pic_info = {
     .name          = "pxa2xx_pic",
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(PXA2xxPICState),
