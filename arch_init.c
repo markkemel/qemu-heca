@@ -52,7 +52,7 @@
 #include "sysemu/sysemu.h"
 #include "heca.h"
 
-#define DEBUG_ARCH_INIT
+//#define DEBUG_ARCH_INIT
 
 #ifdef DEBUG_ARCH_INIT
 #define DPRINTF(fmt, ...) \

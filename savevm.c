@@ -42,7 +42,7 @@
 #include "sysemu/arch_init.h"
 #include "heca.h"
 
-#define DEBUG_SAVEVM
+//#define DEBUG_SAVEVM
 
 #ifdef DEBUG_SAVEVM
 #define DPRINTF(fmt, ...) \
