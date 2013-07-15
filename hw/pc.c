@@ -943,7 +943,6 @@ void *pc_memory_init(MemoryRegion *system_memory,
                                     ram_above_4g);
     }
 
-    /* If requested, init the hecatonchire distributed memory module */
     if (heca_is_enabled()) {
         heca_init(memory_region_get_ram_ptr(ram), memory_region_size(ram));
     }

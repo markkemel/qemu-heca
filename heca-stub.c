@@ -18,6 +18,7 @@ void heca_set_post_copy_phase(void)
 
 bool heca_is_mig_timer_expired(void)
 {
+    return false;
 }
 
 void heca_master_cmdline_init(const char* optarg)

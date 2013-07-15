@@ -53,8 +53,6 @@
 static const int ide_iobase[MAX_IDE_BUS] = { 0x1f0, 0x170 };
 static const int ide_iobase2[MAX_IDE_BUS] = { 0x3f6, 0x376 };
 static const int ide_irq[MAX_IDE_BUS] = { 14, 15 };
-static const char *global_cpu_model;
-#define KVM_MACHINE_OPTIONS ""
 
 /* PC hardware initialisation */
 static void pc_init1(MemoryRegion *system_memory,
@@ -87,8 +85,6 @@ static void pc_init1(MemoryRegion *system_memory,
     MemoryRegion *pci_memory;
     MemoryRegion *rom_memory;
     void *fw_cfg = NULL;
-
-    global_cpu_model = cpu_model;
 
     pc_cpus_init(cpu_model);
     pc_acpi_init("acpi-dsdt.aml");
@@ -388,19 +384,19 @@ static QEMUMachine pc_machine_v1_2 = {
         },{\
             .driver   = "VGA",\
             .property = "vgamem_mb",\
-            .value    = stringify(16),\
+            .value    = stringify(8),\
         },{\
             .driver   = "vmware-svga",\
             .property = "vgamem_mb",\
-            .value    = stringify(16),\
+            .value    = stringify(8),\
         },{\
             .driver   = "qxl-vga",\
             .property = "vgamem_mb",\
-            .value    = stringify(16),\
+            .value    = stringify(8),\
         },{\
             .driver   = "qxl",\
             .property = "vgamem_mb",\
-            .value    = stringify(16),\
+            .value    = stringify(8),\
         },{\
             .driver   = "virtio-blk-pci",\
             .property = "config-wce",\
@@ -412,7 +408,6 @@ static QEMUMachine pc_machine_v1_1 = {
     .desc = "Standard PC",
     .init = pc_init_pci_1_2,
     .max_cpus = 255,
-    .default_machine_opts = KVM_MACHINE_OPTIONS,
     .compat_props = (GlobalProperty[]) {
         PC_COMPAT_1_1,
         { /* end of list */ }
@@ -449,7 +444,6 @@ static QEMUMachine pc_machine_v1_0 = {
     .desc = "Standard PC",
     .init = pc_init_pci_1_2,
     .max_cpus = 255,
-    .default_machine_opts = KVM_MACHINE_OPTIONS,
     .compat_props = (GlobalProperty[]) {
         PC_COMPAT_1_0,
         { /* end of list */ }
@@ -466,7 +460,6 @@ static QEMUMachine pc_machine_v0_15 = {
     .desc = "Standard PC",
     .init = pc_init_pci_1_2,
     .max_cpus = 255,
-    .default_machine_opts = KVM_MACHINE_OPTIONS,
     .compat_props = (GlobalProperty[]) {
         PC_COMPAT_0_15,
         { /* end of list */ }
@@ -500,7 +493,6 @@ static QEMUMachine pc_machine_v0_14 = {
     .desc = "Standard PC",
     .init = pc_init_pci_1_2,
     .max_cpus = 255,
-    .default_machine_opts = KVM_MACHINE_OPTIONS,
     .compat_props = (GlobalProperty[]) {
         PC_COMPAT_0_14, 
         {
@@ -535,7 +527,6 @@ static QEMUMachine pc_machine_v0_13 = {
     .desc = "Standard PC",
     .init = pc_init_pci_no_kvmclock,
     .max_cpus = 255,
-    .default_machine_opts = KVM_MACHINE_OPTIONS,
     .compat_props = (GlobalProperty[]) {
         PC_COMPAT_0_13,
         {
@@ -574,7 +565,6 @@ static QEMUMachine pc_machine_v0_12 = {
     .desc = "Standard PC",
     .init = pc_init_pci_no_kvmclock,
     .max_cpus = 255,
-    .default_machine_opts = KVM_MACHINE_OPTIONS,
     .compat_props = (GlobalProperty[]) {
         PC_COMPAT_0_12,
         {
@@ -609,7 +599,6 @@ static QEMUMachine pc_machine_v0_11 = {
     .desc = "Standard PC, qemu 0.11",
     .init = pc_init_pci_no_kvmclock,
     .max_cpus = 255,
-    .default_machine_opts = KVM_MACHINE_OPTIONS,
     .compat_props = (GlobalProperty[]) {
         PC_COMPAT_0_11,
         {
@@ -632,7 +621,6 @@ static QEMUMachine pc_machine_v0_10 = {
     .desc = "Standard PC, qemu 0.10",
     .init = pc_init_pci_no_kvmclock,
     .max_cpus = 255,
-    .default_machine_opts = KVM_MACHINE_OPTIONS,
     .compat_props = (GlobalProperty[]) {
         PC_COMPAT_0_11,
         {
@@ -667,7 +655,6 @@ static QEMUMachine isapc_machine = {
     .desc = "ISA-only PC",
     .init = pc_init_isa,
     .max_cpus = 1,
-    .default_machine_opts = KVM_MACHINE_OPTIONS,
     .compat_props = (GlobalProperty[]) {
         {
             .driver   = "pc-sysfw",

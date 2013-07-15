@@ -144,9 +144,6 @@ extern int nb_option_roms;
 extern const char *prom_envs[MAX_PROM_ENVS];
 extern unsigned int nb_prom_envs;
 
-/* acpi */
-void qemu_system_cpu_hot_add(int cpu, int state);
-
 /* pci-hotplug */
 void pci_device_hot_add(Monitor *mon, const QDict *qdict);
 int pci_drive_hot_add(Monitor *mon, const QDict *qdict, DriveInfo *dinfo);

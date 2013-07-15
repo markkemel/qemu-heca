@@ -1,6 +1,7 @@
 #include <libheca.h>
 #include "qemu/timer.h"
 #include "exec/memory.h"
+#include "sysemu/sysemu.h"
 #include "heca.h"
 
 #ifdef DEBUG_HECA
@@ -30,7 +31,6 @@ int heca_gdb_pause = 1;
 
 void *heca_get_system_ram_ptr(void);
 uint64_t heca_get_system_ram_size(void);
-void heca_touch_all_ram(void);
 void heca_start_mig_timer(uint64_t timeout);
 int heca_unmap_memory(void *addr, size_t size);
 void parse_heca_master_commandline(const char* optarg);
@@ -509,19 +509,22 @@ static void * touch_all_ram_worker(void *arg)
             }
         }
     }
+
     DPRINTF("Finished reading ram, please terminate the source node.\n");
     /* TODO: Send a message to the source to self terminate */
 
     pthread_exit(NULL);
 }
 
-
-void heca_touch_all_ram(void)
+static void heca_change_state_handler(void *opaque, int running,
+        RunState state)
 {
+    static int has_run;
     pthread_t t;
-    pthread_create(&t, NULL, touch_all_ram_worker, NULL);
-}
 
+    if (running && !has_run++)
+        pthread_create(&t, NULL, touch_all_ram_worker, NULL);
+}
 
 int heca_unmap_memory(void* addr, size_t size)
 {
@@ -552,7 +555,6 @@ static void mig_timer_expired(void *opaque)
 
 void heca_start_mig_timer(uint64_t timeout) 
 {
-    // Start timer with timeout value and mig_timer_expired callback
     heca.migration_timer = qemu_new_timer_ms(rt_clock, mig_timer_expired, NULL);
     qemu_mod_timer(heca.migration_timer, qemu_get_clock_ms(rt_clock) + timeout);
 }
@@ -616,8 +618,7 @@ int heca_unmap_dirty_bitmap(uint8_t *bitmap, uint32_t bitmap_size)
             return ret;
         }
     }
-    heca_touch_all_ram();
-
+    qemu_add_vm_change_state_handler(heca_change_state_handler, NULL);
     return ret;
 }
 
@@ -666,5 +667,4 @@ void heca_init(void* ram_ptr, uint64_t ram_size)
     DPRINTF("Heca is ready...\n");
 
 }
-
 

@@ -24,7 +24,7 @@
 #include "qemu/thread.h"
 #include "qmp-commands.h"
 
-//#define DEBUG_MIGRATION
+#define DEBUG_MIGRATION
 
 #ifdef DEBUG_MIGRATION
 #define DPRINTF(fmt, ...) \
@@ -102,6 +102,7 @@ static void process_incoming_migration_co(void *opaque)
     }
     qemu_announce_self();
     DPRINTF("successfully loaded vm state\n");
+
     bdrv_clear_incoming_migration_all();
     /* Make sure all file formats flush their mutable metadata */
     bdrv_invalidate_cache_all();
@@ -689,7 +690,9 @@ static void *buffered_file_thread(void *opaque)
             DPRINTF("iterate\n");
             pending_size = qemu_savevm_state_pending(s->file, max_size);
             DPRINTF("pending size %lu max %lu\n", pending_size, max_size);
-            if (pending_size && pending_size >= max_size) {
+
+            if (!(heca_is_enabled() && !heca_is_mig_timer_expired()) 
+                    && pending_size && pending_size >= max_size) {
                 ret = qemu_savevm_state_iterate(s->file);
                 if (ret < 0) {
                     qemu_mutex_unlock_iothread();

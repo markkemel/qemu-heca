@@ -42,6 +42,16 @@
 #include "sysemu/arch_init.h"
 #include "heca.h"
 
+#define DEBUG_SAVEVM
+
+#ifdef DEBUG_SAVEVM
+#define DPRINTF(fmt, ...) \
+    do { fprintf(stdout, "savevm: " fmt, ## __VA_ARGS__); } while (0)
+#else
+#define DPRINTF(fmt, ...) \
+    do { } while (0)
+#endif
+
 #define SELF_ANNOUNCE_ROUNDS 5
 
 #ifndef ETH_P_RARP
@@ -1568,7 +1578,7 @@ static void vmstate_save(QEMUFile *f, SaveStateEntry *se)
 #define QEMU_VM_SECTION_END          0x03
 #define QEMU_VM_SECTION_FULL         0x04
 #define QEMU_VM_SUBSECTION           0x05
-#define QEMU_VM_SEND_UNMAP           0x06
+#define QEMU_VM_SECTION_UNMAP        0x06
 
 bool qemu_savevm_state_blocked(Error **errp)
 {
@@ -1622,6 +1632,9 @@ int qemu_savevm_state_begin(QEMUFile *f,
         qemu_put_be32(f, se->instance_id);
         qemu_put_be32(f, se->version_id);
 
+        DPRINTF("saved QEMU_VM_SECTION_START: name=%s sec=%d inst=%d ver=%d\n",
+                se->idstr, se->section_id, se->instance_id, se->version_id);
+
         ret = se->ops->save_live_setup(f, se->opaque);
         if (ret < 0) {
             qemu_savevm_state_cancel();
@@ -1649,6 +1662,7 @@ int qemu_savevm_state_iterate(QEMUFile *f)
     int ret = 1;
 
     QTAILQ_FOREACH(se, &savevm_handlers, entry) {
+        DPRINTF("QTAILQ_FOREACH: name=%s sec=%d\n", se->idstr, se->section_id);
         if (!se->ops || !se->ops->save_live_iterate) {
             continue;
         }
@@ -1660,13 +1674,18 @@ int qemu_savevm_state_iterate(QEMUFile *f)
         if (qemu_file_rate_limit(f)) {
             return 0;
         }
+
         trace_savevm_section_start();
         /* Section type */
         qemu_put_byte(f, QEMU_VM_SECTION_PART);
         qemu_put_be32(f, se->section_id);
-
         ret = se->ops->save_live_iterate(f, se->opaque);
+        DPRINTF("saved QEMU_VM_SECTION_PART: sec=%d\n", se->section_id);
         trace_savevm_section_end(se->section_id);
+
+        if (!strcmp(se->idstr, "ram") && heca_is_enabled() &&
+                heca_is_mig_timer_expired())
+            ret = 1;
 
         if (ret <= 0) {
             /* Do not proceed to the next vmstate before this one reported
@@ -1709,6 +1728,8 @@ int qemu_savevm_state_complete(QEMUFile *f)
         qemu_put_byte(f, QEMU_VM_SECTION_END);
         qemu_put_be32(f, se->section_id);
 
+        DPRINTF("saved QEMU_VM_SECTION_END: sec=%d\n", se->section_id);
+
         ret = se->ops->save_live_complete(f, se->opaque);
         trace_savevm_section_end(se->section_id);
         if (ret < 0) {
@@ -1718,14 +1739,15 @@ int qemu_savevm_state_complete(QEMUFile *f)
 
     if (heca_is_enabled()) {
         QTAILQ_FOREACH(se, &savevm_handlers, entry) {
-            if (strncmp(se->idstr, "ram", strlen(se->idstr)) != 0) // just do it once for ram
+            if (strcmp(se->idstr, "ram"))
                 continue;
-            
-            trace_savevm_section_start();
-            qemu_put_byte(f, QEMU_VM_SEND_UNMAP);
-            qemu_put_be32(f, se->section_id);
 
-            ret = ram_send_block_info(f);
+            trace_savevm_section_start();
+            qemu_put_byte(f, QEMU_VM_SECTION_UNMAP);
+            qemu_put_be32(f, se->section_id);
+            DPRINTF("saved QEMU_VM_SECTION_UNMAP: sec=%d\n", se->section_id);
+
+            ret = pcram_bitmap_save(f);
             if (ret < 0)
                 return ret;
             trace_savevm_section_end(se->section_id);
@@ -1738,7 +1760,6 @@ int qemu_savevm_state_complete(QEMUFile *f)
         if ((!se->ops || !se->ops->save_state) && !se->vmsd) {
             continue;
         }
-
         trace_savevm_section_start();
         /* Section type */
         qemu_put_byte(f, QEMU_VM_SECTION_FULL);
@@ -1751,11 +1772,12 @@ int qemu_savevm_state_complete(QEMUFile *f)
 
         qemu_put_be32(f, se->instance_id);
         qemu_put_be32(f, se->version_id);
-
         vmstate_save(f, se);
+
+        DPRINTF("saved QEMU_VM_SECTION_FULL: sec=%d name=%s inst=%d ver=%d\n",
+                se->section_id, se->idstr, se->instance_id, se->version_id);
         trace_savevm_section_end(se->section_id);
     }
-
 
     qemu_put_byte(f, QEMU_VM_EOF);
 
@@ -1806,22 +1828,28 @@ static int qemu_savevm_state(QEMUFile *f)
     }
 
     ret = qemu_savevm_state_begin(f, &params);
+    DPRINTF("qemu_savevm_state_begin() --> %d\n", ret);
     if (ret < 0)
         goto out;
 
     do {
         ret = qemu_savevm_state_iterate(f);
-        if ((ret < 0) || (heca_is_enabled() && heca_is_mig_timer_expired()))
+        DPRINTF("qemu_savevm_state_iterate() --> %d\n", ret);
+        if (ret < 0)
+            goto out;
+        if (heca_is_enabled() && heca_is_mig_timer_expired())
             goto out;
     } while (ret == 0);
 
     ret = qemu_savevm_state_complete(f);
+    DPRINTF("qemu_savevm_state_complete() --> %d\n", ret);
 
 out:
     if (ret == 0) {
         ret = qemu_file_get_error(f);
     }
 
+    DPRINTF("() --> %d\n", ret);
     return ret;
 }
 
@@ -2060,17 +2088,19 @@ int qemu_loadvm_state(QEMUFile *f)
                 goto out;
             }
             break;
-        case QEMU_VM_SEND_UNMAP:
-
+        case QEMU_VM_SECTION_UNMAP:
             section_id = qemu_get_be32(f);
             QLIST_FOREACH(le, &loadvm_handlers, entry) {
                 if (le->section_id == section_id) {
                     break;
                 }
             }
-            ret = get_ram_unmap_info(f);
-            if (ret < 0) 
+            ret = pcram_bitmap_load(f);
+            if (ret < 0) {
+                fprintf(stderr, "qemu: warning: error while loading unmap section id %d\n",
+                        section_id);
                 goto out;
+            }
             
             break;
         default:

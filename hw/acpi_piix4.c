@@ -39,7 +39,6 @@
 #endif
 
 #define GPE_BASE 0xafe0
-#define PROC_BASE 0xaf00
 #define GPE_LEN 4
 
 #define PCI_HOTPLUG_ADDR 0xae00
@@ -49,12 +48,7 @@
 #define PCI_EJ_BASE 0xae08
 #define PCI_RMV_BASE 0xae0c
 
-#define PIIX4_CPU_HOTPLUG_STATUS 4
 #define PIIX4_PCI_HOTPLUG_STATUS 2
-
-struct gpe_regs {
-    uint8_t cpus_sts[32];
-};
 
 struct pci_status {
     uint32_t up; /* deprecated, maintained for migration compatibility */
@@ -81,7 +75,6 @@ typedef struct PIIX4PMState {
     Notifier powerdown_notifier;
 
     /* for pci hotplug */
-    struct gpe_regs gpe_cpu;
     struct pci_status pci0_status;
     uint32_t pci0_hotplug_enable;
     uint32_t pci0_slot_device_present;
@@ -388,15 +381,10 @@ static void piix4_pm_machine_ready(Notifier *n, void *opaque)
 
 }
 
-static PIIX4PMState *global_piix4_pm_state; /* cpu hotadd */
-
 static int piix4_pm_initfn(PCIDevice *dev)
 {
     PIIX4PMState *s = DO_UPCAST(PIIX4PMState, dev, dev);
     uint8_t *pci_conf;
-
-    /* for cpu hotadd */
-    global_piix4_pm_state = s;
 
     pci_conf = s->dev.config;
     pci_conf[0x06] = 0x80;
@@ -516,16 +504,7 @@ type_init(piix4_pm_register_types)
 static uint64_t gpe_readb(void *opaque, hwaddr addr, unsigned width)
 {
     PIIX4PMState *s = opaque;
-    uint32_t val = 0;
-    struct gpe_regs *g = &s->gpe_cpu;
-
-    switch (addr) {
-        case PROC_BASE ... PROC_BASE+31:
-            val = g->cpus_sts[addr - PROC_BASE];
-            break;
-        default:
-            val = acpi_gpe_ioport_readb(&s->ar, addr);
-    }
+    uint32_t val = acpi_gpe_ioport_readb(&s->ar, addr);
 
     PIIX4_DPRINTF("gpe read %x == %x\n", addr, val);
     return val;
@@ -606,8 +585,6 @@ static const MemoryRegionOps piix4_pci_ops = {
     },
 };
 
-extern const char *global_cpu_model;
-
 static int piix4_device_hotplug(DeviceState *qdev, PCIDevice *dev,
                                 PCIHotplugState state);
 
@@ -624,49 +601,6 @@ static void piix4_acpi_system_hot_add_init(MemoryRegion *parent,
                                 &s->io_pci);
     pci_bus_hotplug(bus, piix4_device_hotplug, &s->dev.qdev);
 }
-
-#if 0
-//#if defined(TARGET_I386)
-static void enable_processor(PIIX4PMState *s, int cpu)
-{
-    struct gpe_regs *g = &s->gpe_cpu;
-    ACPIGPE *gpe = &s->ar.gpe;
-
-    *gpe->sts = *gpe->sts | PIIX4_CPU_HOTPLUG_STATUS;
-    g->cpus_sts[cpu/8] |= (1 << (cpu%8));
-}
-
-static void disable_processor(PIIX4PMState *s, int cpu)
-{
-    struct gpe_regs *g = &s->gpe_cpu;
-    ACPIGPE *gpe = &s->ar.gpe;
-
-    *gpe->sts = *gpe->sts | PIIX4_CPU_HOTPLUG_STATUS;
-    g->cpus_sts[cpu/8] &= ~(1 << (cpu%8));
-}
-
-void qemu_system_cpu_hot_add(int cpu, int state)
-{
-    X86CPU *env;
-    PIIX4PMState *s = global_piix4_pm_state;
-
-    if (state && !qemu_get_cpu(cpu)) {
-        env = pc_new_cpu(global_cpu_model);
-        if (!env) {
-            fprintf(stderr, "cpu %d creation failed\n", cpu);
-            return;
-        }
-        env->env.cpuid_apic_id = cpu;
-    }
-
-    if (state)
-        enable_processor(s, cpu);
-    else
-        disable_processor(s, cpu);
-
-    pm_update_sci(s);
-}
-#endif
 
 static void enable_device(PIIX4PMState *s, int slot)
 {

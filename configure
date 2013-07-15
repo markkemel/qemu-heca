@@ -125,17 +125,9 @@ cc_i386=i386-pc-linux-gnu-gcc
 libs_qga=""
 debug_info="yes"
 
+# Don't accept a target_list environment variable.
+unset target_list
 
-target_list="x86_64-softmmu"
-kvm_version() {
-    local fname="$(dirname "$0")/KVM_VERSION"
-
-    if test -f "$fname"; then
-        cat "$fname"
-    else
-        echo "qemu-kvm-devel"
-    fi
-}
 # Default value for a variable defining feature "foo".
 #  * foo="no"  feature will only be used if --enable-foo arg is given
 #  * foo=""    feature will be searched for, and if found, will be used
@@ -217,7 +209,7 @@ uname_release=""
 mixemu="no"
 aix="no"
 blobs="yes"
-pkgversion=" ($(kvm_version))"
+pkgversion=""
 pie=""
 zero_malloc=""
 trace_backend="nop"
@@ -4102,7 +4094,6 @@ case "$target_arch2" in
       \( "$target_arch2" = "x86_64" -a "$cpu" = "i386"   \) -o \
       \( "$target_arch2" = "i386"   -a "$cpu" = "x86_64" \) \) ; then
       echo "CONFIG_KVM=y" >> $config_target_mak
-      echo "CONFIG_KVM_OPTIONS=y" >> $config_host_mak
       if test "$vhost_net" = "yes" ; then
         echo "CONFIG_VHOST_NET=y" >> $config_target_mak
       fi

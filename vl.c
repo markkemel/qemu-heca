@@ -4336,7 +4336,6 @@ int main(int argc, char **argv, char **envp)
         exit(0);
     }
 
-
     os_setup_post();
 
     resume_all_vcpus();
@@ -4347,4 +4346,3 @@ int main(int argc, char **argv, char **envp)
 
     return 0;
 }
-

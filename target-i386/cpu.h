@@ -1053,7 +1053,6 @@ void cpu_x86_update_cr4(CPUX86State *env, uint32_t new_cr4);
 /* hw/pc.c */
 void cpu_smm_update(CPUX86State *env);
 uint64_t cpu_get_tsc(CPUX86State *env);
-X86CPU *pc_new_cpu(const char *cpu_model);
 
 #define TARGET_PAGE_BITS 12
 
