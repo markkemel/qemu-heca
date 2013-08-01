@@ -21,7 +21,7 @@
  */
 
 #include "sysbus.h"
-#include "qemu-timer.h"
+#include "qemu/timer.h"
 #include "qemu-common.h"
 #include "ptimer.h"
 
@@ -208,7 +208,7 @@ static void exynos4210_pwm_tick(void *opaque)
 /*
  * PWM Read
  */
-static uint64_t exynos4210_pwm_read(void *opaque, target_phys_addr_t offset,
+static uint64_t exynos4210_pwm_read(void *opaque, hwaddr offset,
         unsigned size)
 {
     Exynos4210PWMState *s = (Exynos4210PWMState *)opaque;
@@ -259,7 +259,7 @@ static uint64_t exynos4210_pwm_read(void *opaque, target_phys_addr_t offset,
 /*
  * PWM Write
  */
-static void exynos4210_pwm_write(void *opaque, target_phys_addr_t offset,
+static void exynos4210_pwm_write(void *opaque, hwaddr offset,
         uint64_t value, unsigned size)
 {
     Exynos4210PWMState *s = (Exynos4210PWMState *)opaque;
@@ -407,7 +407,7 @@ static void exynos4210_pwm_class_init(ObjectClass *klass, void *data)
     dc->vmsd = &vmstate_exynos4210_pwm_state;
 }
 
-static TypeInfo exynos4210_pwm_info = {
+static const TypeInfo exynos4210_pwm_info = {
     .name          = "exynos4210.pwm",
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(Exynos4210PWMState),

@@ -1,14 +1,14 @@
 #include "cpu.h"
-#include "gdbstub.h"
+#include "exec/gdbstub.h"
 #include "helper.h"
-#include "host-utils.h"
-#include "sysemu.h"
-#include "bitops.h"
+#include "qemu/host-utils.h"
+#include "sysemu/sysemu.h"
+#include "qemu/bitops.h"
 
 #ifndef CONFIG_USER_ONLY
 static inline int get_phys_addr(CPUARMState *env, uint32_t address,
                                 int access_type, int is_user,
-                                target_phys_addr_t *phys_ptr, int *prot,
+                                hwaddr *phys_ptr, int *prot,
                                 target_ulong *page_size);
 #endif
 
@@ -517,7 +517,7 @@ static inline bool extended_addresses_enabled(CPUARMState *env)
 
 static int ats_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
 {
-    target_phys_addr_t phys_addr;
+    hwaddr phys_addr;
     target_ulong page_size;
     int prot;
     int ret, is_user = ri->opc2 & 2;
@@ -902,7 +902,8 @@ static const ARMCPRegInfo strongarm_cp_reginfo[] = {
 static int mpidr_read(CPUARMState *env, const ARMCPRegInfo *ri,
                       uint64_t *value)
 {
-    uint32_t mpidr = env->cpu_index;
+    CPUState *cs = CPU(arm_env_get_cpu(env));
+    uint32_t mpidr = cs->cpu_index;
     /* We don't support setting cluster ID ([8..11])
      * so these bits always RAZ.
      */
@@ -1261,12 +1262,14 @@ ARMCPU *cpu_arm_init(const char *cpu_model)
 {
     ARMCPU *cpu;
     CPUARMState *env;
+    ObjectClass *oc;
     static int inited = 0;
 
-    if (!object_class_by_name(cpu_model)) {
+    oc = cpu_class_by_name(TYPE_ARM_CPU, cpu_model);
+    if (!oc) {
         return NULL;
     }
-    cpu = ARM_CPU(object_new(cpu_model));
+    cpu = ARM_CPU(object_new(object_class_get_name(oc)));
     env = &cpu->env;
     env->cpu_model_str = cpu_model;
     arm_cpu_realize(cpu);
@@ -1291,11 +1294,6 @@ ARMCPU *cpu_arm_init(const char *cpu_model)
     return cpu;
 }
 
-typedef struct ARMCPUListState {
-    fprintf_function cpu_fprintf;
-    FILE *file;
-} ARMCPUListState;
-
 /* Sort alphabetically by type name, except for "any". */
 static gint arm_cpu_list_compare(gconstpointer a, gconstpointer b)
 {
@@ -1305,9 +1303,9 @@ static gint arm_cpu_list_compare(gconstpointer a, gconstpointer b)
 
     name_a = object_class_get_name(class_a);
     name_b = object_class_get_name(class_b);
-    if (strcmp(name_a, "any") == 0) {
+    if (strcmp(name_a, "any-" TYPE_ARM_CPU) == 0) {
         return 1;
-    } else if (strcmp(name_b, "any") == 0) {
+    } else if (strcmp(name_b, "any-" TYPE_ARM_CPU) == 0) {
         return -1;
     } else {
         return strcmp(name_a, name_b);
@@ -1317,15 +1315,20 @@ static gint arm_cpu_list_compare(gconstpointer a, gconstpointer b)
 static void arm_cpu_list_entry(gpointer data, gpointer user_data)
 {
     ObjectClass *oc = data;
-    ARMCPUListState *s = user_data;
+    CPUListState *s = user_data;
+    const char *typename;
+    char *name;
 
+    typename = object_class_get_name(oc);
+    name = g_strndup(typename, strlen(typename) - strlen("-" TYPE_ARM_CPU));
     (*s->cpu_fprintf)(s->file, "  %s\n",
-                      object_class_get_name(oc));
+                      name);
+    g_free(name);
 }
 
 void arm_cpu_list(FILE *f, fprintf_function cpu_fprintf)
 {
-    ARMCPUListState s = {
+    CPUListState s = {
         .file = f,
         .cpu_fprintf = cpu_fprintf,
     };
@@ -1562,11 +1565,6 @@ uint32_t HELPER(rbit)(uint32_t x)
     return x;
 }
 
-uint32_t HELPER(abs)(uint32_t x)
-{
-    return ((int32_t)x < 0) ? -x : x;
-}
-
 #if defined(CONFIG_USER_ONLY)
 
 void do_interrupt (CPUARMState *env)
@@ -1746,7 +1744,7 @@ static void do_interrupt_v7m(CPUARMState *env)
         armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_USAGE);
         return;
     case EXCP_SWI:
-        env->regs[15] += 2;
+        /* The PC already points to the next instruction.  */
         armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_SVC);
         return;
     case EXCP_PREFETCH_ABORT:
@@ -1980,7 +1978,7 @@ static uint32_t get_level1_table_address(CPUARMState *env, uint32_t address)
 }
 
 static int get_phys_addr_v5(CPUARMState *env, uint32_t address, int access_type,
-                            int is_user, target_phys_addr_t *phys_ptr,
+                            int is_user, hwaddr *phys_ptr,
                             int *prot, target_ulong *page_size)
 {
     int code;
@@ -1990,7 +1988,7 @@ static int get_phys_addr_v5(CPUARMState *env, uint32_t address, int access_type,
     int ap;
     int domain;
     int domain_prot;
-    target_phys_addr_t phys_addr;
+    hwaddr phys_addr;
 
     /* Pagetable walk.  */
     /* Lookup l1 descriptor.  */
@@ -2075,7 +2073,7 @@ do_fault:
 }
 
 static int get_phys_addr_v6(CPUARMState *env, uint32_t address, int access_type,
-                            int is_user, target_phys_addr_t *phys_ptr,
+                            int is_user, hwaddr *phys_ptr,
                             int *prot, target_ulong *page_size)
 {
     int code;
@@ -2087,7 +2085,7 @@ static int get_phys_addr_v6(CPUARMState *env, uint32_t address, int access_type,
     int ap;
     int domain = 0;
     int domain_prot;
-    target_phys_addr_t phys_addr;
+    hwaddr phys_addr;
 
     /* Pagetable walk.  */
     /* Lookup l1 descriptor.  */
@@ -2197,7 +2195,7 @@ typedef enum {
 
 static int get_phys_addr_lpae(CPUARMState *env, uint32_t address,
                               int access_type, int is_user,
-                              target_phys_addr_t *phys_ptr, int *prot,
+                              hwaddr *phys_ptr, int *prot,
                               target_ulong *page_size_ptr)
 {
     /* Read an LPAE long-descriptor translation table. */
@@ -2208,7 +2206,7 @@ static int get_phys_addr_lpae(CPUARMState *env, uint32_t address,
     uint64_t ttbr;
     int ttbr_select;
     int n;
-    target_phys_addr_t descaddr;
+    hwaddr descaddr;
     uint32_t tableattrs;
     target_ulong page_size;
     uint32_t attrs;
@@ -2366,7 +2364,7 @@ do_fault:
 
 static int get_phys_addr_mpu(CPUARMState *env, uint32_t address,
                              int access_type, int is_user,
-                             target_phys_addr_t *phys_ptr, int *prot)
+                             hwaddr *phys_ptr, int *prot)
 {
     int n;
     uint32_t mask;
@@ -2450,7 +2448,7 @@ static int get_phys_addr_mpu(CPUARMState *env, uint32_t address,
  */
 static inline int get_phys_addr(CPUARMState *env, uint32_t address,
                                 int access_type, int is_user,
-                                target_phys_addr_t *phys_ptr, int *prot,
+                                hwaddr *phys_ptr, int *prot,
                                 target_ulong *page_size)
 {
     /* Fast Context Switch Extension.  */
@@ -2482,7 +2480,7 @@ static inline int get_phys_addr(CPUARMState *env, uint32_t address,
 int cpu_arm_handle_mmu_fault (CPUARMState *env, target_ulong address,
                               int access_type, int mmu_idx)
 {
-    target_phys_addr_t phys_addr;
+    hwaddr phys_addr;
     target_ulong page_size;
     int prot;
     int ret, is_user;
@@ -2492,7 +2490,7 @@ int cpu_arm_handle_mmu_fault (CPUARMState *env, target_ulong address,
                         &page_size);
     if (ret == 0) {
         /* Map a single [sub]page.  */
-        phys_addr &= ~(target_phys_addr_t)0x3ff;
+        phys_addr &= ~(hwaddr)0x3ff;
         address &= ~(uint32_t)0x3ff;
         tlb_set_page (env, address, phys_addr, prot, mmu_idx, page_size);
         return 0;
@@ -2512,9 +2510,9 @@ int cpu_arm_handle_mmu_fault (CPUARMState *env, target_ulong address,
     return 1;
 }
 
-target_phys_addr_t cpu_get_phys_page_debug(CPUARMState *env, target_ulong addr)
+hwaddr cpu_get_phys_page_debug(CPUARMState *env, target_ulong addr)
 {
-    target_phys_addr_t phys_addr;
+    hwaddr phys_addr;
     target_ulong page_size;
     int prot;
     int ret;

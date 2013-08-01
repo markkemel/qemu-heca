@@ -25,7 +25,7 @@
 #include "hw.h"
 #include "pc.h"
 #include "isa.h"
-#include "qemu-timer.h"
+#include "qemu/timer.h"
 #include "i8254.h"
 #include "i8254_internal.h"
 
@@ -275,7 +275,7 @@ static const VMStateDescription vmstate_pit_common = {
     .pre_save = pit_dispatch_pre_save,
     .post_load = pit_dispatch_post_load,
     .fields = (VMStateField[]) {
-        VMSTATE_UINT32(channels[0].irq_disabled, PITCommonState), /* qemu-kvm's v2 had 'flags' here */
+        VMSTATE_UINT32_V(channels[0].irq_disabled, PITCommonState, 3),
         VMSTATE_STRUCT_ARRAY(channels, PITCommonState, 3, 2,
                              vmstate_pit_channel, PITChannelState),
         VMSTATE_INT64(channels[0].next_transition_time,
@@ -294,7 +294,7 @@ static void pit_common_class_init(ObjectClass *klass, void *data)
     dc->no_user = 1;
 }
 
-static TypeInfo pit_common_type = {
+static const TypeInfo pit_common_type = {
     .name          = TYPE_PIT_COMMON,
     .parent        = TYPE_ISA_DEVICE,
     .instance_size = sizeof(PITCommonState),

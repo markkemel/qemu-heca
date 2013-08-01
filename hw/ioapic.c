@@ -139,7 +139,7 @@ void ioapic_eoi_broadcast(int vector)
 }
 
 static uint64_t
-ioapic_mem_read(void *opaque, target_phys_addr_t addr, unsigned int size)
+ioapic_mem_read(void *opaque, hwaddr addr, unsigned int size)
 {
     IOAPICCommonState *s = opaque;
     int index;
@@ -181,7 +181,7 @@ ioapic_mem_read(void *opaque, target_phys_addr_t addr, unsigned int size)
 }
 
 static void
-ioapic_mem_write(void *opaque, target_phys_addr_t addr, uint64_t val,
+ioapic_mem_write(void *opaque, hwaddr addr, uint64_t val,
                  unsigned int size)
 {
     IOAPICCommonState *s = opaque;
@@ -244,7 +244,7 @@ static void ioapic_class_init(ObjectClass *klass, void *data)
     dc->reset = ioapic_reset_common;
 }
 
-static TypeInfo ioapic_info = {
+static const TypeInfo ioapic_info = {
     .name          = "ioapic",
     .parent        = TYPE_IOAPIC_COMMON,
     .instance_size = sizeof(IOAPICCommonState),

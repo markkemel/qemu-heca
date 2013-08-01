@@ -18,7 +18,7 @@
  * with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 #include "qemu-common.h"
-#include "qemu-timer.h"
+#include "qemu/timer.h"
 #include "omap.h"
 #include "irq.h"
 #include "soc_dma.h"
@@ -31,7 +31,7 @@ struct omap_dma_channel_s {
     int endian_lock[2];
     int translate[2];
     enum omap_dma_port port[2];
-    target_phys_addr_t addr[2];
+    hwaddr addr[2];
     omap_dma_addressing_t mode[2];
     uint32_t elements;
     uint16_t frames;
@@ -78,7 +78,7 @@ struct omap_dma_channel_s {
     struct omap_dma_channel_s *sibling;
 
     struct omap_dma_reg_set_s {
-        target_phys_addr_t src, dest;
+        hwaddr src, dest;
         int frame;
         int element;
         int pck_element;
@@ -914,7 +914,7 @@ static int omap_dma_ch_reg_write(struct omap_dma_s *s,
         break;
 
     case 0x06:	/* SYS_DMA_CSR_CH0 */
-        OMAP_RO_REG((target_phys_addr_t) reg);
+        OMAP_RO_REG((hwaddr) reg);
         break;
 
     case 0x08:	/* SYS_DMA_CSSA_L_CH0 */
@@ -954,7 +954,7 @@ static int omap_dma_ch_reg_write(struct omap_dma_s *s,
         break;
 
     case 0x18:	/* SYS_DMA_CPC_CH0 or DMA_CSAC */
-        OMAP_RO_REG((target_phys_addr_t) reg);
+        OMAP_RO_REG((hwaddr) reg);
         break;
 
     case 0x1c:	/* DMA_CDEI */
@@ -1446,7 +1446,7 @@ static int omap_dma_sys_read(struct omap_dma_s *s, int offset,
     return 0;
 }
 
-static uint64_t omap_dma_read(void *opaque, target_phys_addr_t addr,
+static uint64_t omap_dma_read(void *opaque, hwaddr addr,
                               unsigned size)
 {
     struct omap_dma_s *s = (struct omap_dma_s *) opaque;
@@ -1494,7 +1494,7 @@ static uint64_t omap_dma_read(void *opaque, target_phys_addr_t addr,
     return 0;
 }
 
-static void omap_dma_write(void *opaque, target_phys_addr_t addr,
+static void omap_dma_write(void *opaque, hwaddr addr,
                            uint64_t value, unsigned size)
 {
     struct omap_dma_s *s = (struct omap_dma_s *) opaque;
@@ -1618,7 +1618,7 @@ static void omap_dma_setcaps(struct omap_dma_s *s)
     }
 }
 
-struct soc_dma_s *omap_dma_init(target_phys_addr_t base, qemu_irq *irqs,
+struct soc_dma_s *omap_dma_init(hwaddr base, qemu_irq *irqs,
                 MemoryRegion *sysmem,
                 qemu_irq lcd_irq, struct omap_mpu_state_s *mpu, omap_clk clk,
                 enum omap_dma_model model)
@@ -1692,7 +1692,7 @@ static void omap_dma_interrupts_4_update(struct omap_dma_s *s)
         qemu_irq_raise(s->irq[3]);
 }
 
-static uint64_t omap_dma4_read(void *opaque, target_phys_addr_t addr,
+static uint64_t omap_dma4_read(void *opaque, hwaddr addr,
                                unsigned size)
 {
     struct omap_dma_s *s = (struct omap_dma_s *) opaque;
@@ -1709,19 +1709,25 @@ static uint64_t omap_dma4_read(void *opaque, target_phys_addr_t addr,
 
     case 0x14:	/* DMA4_IRQSTATUS_L3 */
         irqn ++;
+        /* fall through */
     case 0x10:	/* DMA4_IRQSTATUS_L2 */
         irqn ++;
+        /* fall through */
     case 0x0c:	/* DMA4_IRQSTATUS_L1 */
         irqn ++;
+        /* fall through */
     case 0x08:	/* DMA4_IRQSTATUS_L0 */
         return s->irqstat[irqn];
 
     case 0x24:	/* DMA4_IRQENABLE_L3 */
         irqn ++;
+        /* fall through */
     case 0x20:	/* DMA4_IRQENABLE_L2 */
         irqn ++;
+        /* fall through */
     case 0x1c:	/* DMA4_IRQENABLE_L1 */
         irqn ++;
+        /* fall through */
     case 0x18:	/* DMA4_IRQENABLE_L0 */
         return s->irqen[irqn];
 
@@ -1842,7 +1848,7 @@ static uint64_t omap_dma4_read(void *opaque, target_phys_addr_t addr,
     }
 }
 
-static void omap_dma4_write(void *opaque, target_phys_addr_t addr,
+static void omap_dma4_write(void *opaque, hwaddr addr,
                             uint64_t value, unsigned size)
 {
     struct omap_dma_s *s = (struct omap_dma_s *) opaque;
@@ -1856,10 +1862,13 @@ static void omap_dma4_write(void *opaque, target_phys_addr_t addr,
     switch (addr) {
     case 0x14:	/* DMA4_IRQSTATUS_L3 */
         irqn ++;
+        /* fall through */
     case 0x10:	/* DMA4_IRQSTATUS_L2 */
         irqn ++;
+        /* fall through */
     case 0x0c:	/* DMA4_IRQSTATUS_L1 */
         irqn ++;
+        /* fall through */
     case 0x08:	/* DMA4_IRQSTATUS_L0 */
         s->irqstat[irqn] &= ~value;
         if (!s->irqstat[irqn])
@@ -1868,10 +1877,13 @@ static void omap_dma4_write(void *opaque, target_phys_addr_t addr,
 
     case 0x24:	/* DMA4_IRQENABLE_L3 */
         irqn ++;
+        /* fall through */
     case 0x20:	/* DMA4_IRQENABLE_L2 */
         irqn ++;
+        /* fall through */
     case 0x1c:	/* DMA4_IRQENABLE_L1 */
         irqn ++;
+        /* fall through */
     case 0x18:	/* DMA4_IRQENABLE_L0 */
         s->irqen[irqn] = value;
         return;
@@ -1988,12 +2000,12 @@ static void omap_dma4_write(void *opaque, target_phys_addr_t addr,
         break;
 
     case 0x1c:	/* DMA4_CSSA */
-        ch->addr[0] = (target_phys_addr_t) (uint32_t) value;
+        ch->addr[0] = (hwaddr) (uint32_t) value;
         ch->set_update = 1;
         break;
 
     case 0x20:	/* DMA4_CDSA */
-        ch->addr[1] = (target_phys_addr_t) (uint32_t) value;
+        ch->addr[1] = (hwaddr) (uint32_t) value;
         ch->set_update = 1;
         break;
 
@@ -2040,7 +2052,7 @@ static const MemoryRegionOps omap_dma4_ops = {
     .endianness = DEVICE_NATIVE_ENDIAN,
 };
 
-struct soc_dma_s *omap_dma4_init(target_phys_addr_t base, qemu_irq *irqs,
+struct soc_dma_s *omap_dma4_init(hwaddr base, qemu_irq *irqs,
                 MemoryRegion *sysmem,
                 struct omap_mpu_state_s *mpu, int fifo,
                 int chans, omap_clk iclk, omap_clk fclk)

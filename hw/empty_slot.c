@@ -28,14 +28,14 @@ typedef struct EmptySlot {
     uint64_t size;
 } EmptySlot;
 
-static uint64_t empty_slot_read(void *opaque, target_phys_addr_t addr,
+static uint64_t empty_slot_read(void *opaque, hwaddr addr,
                                 unsigned size)
 {
     DPRINTF("read from " TARGET_FMT_plx "\n", addr);
     return 0;
 }
 
-static void empty_slot_write(void *opaque, target_phys_addr_t addr,
+static void empty_slot_write(void *opaque, hwaddr addr,
                              uint64_t val, unsigned size)
 {
     DPRINTF("write 0x%x to " TARGET_FMT_plx "\n", (unsigned)val, addr);
@@ -47,7 +47,7 @@ static const MemoryRegionOps empty_slot_ops = {
     .endianness = DEVICE_NATIVE_ENDIAN,
 };
 
-void empty_slot_init(target_phys_addr_t addr, uint64_t slot_size)
+void empty_slot_init(hwaddr addr, uint64_t slot_size)
 {
     if (slot_size > 0) {
         /* Only empty slots larger than 0 byte need handling. */
@@ -56,7 +56,7 @@ void empty_slot_init(target_phys_addr_t addr, uint64_t slot_size)
         EmptySlot *e;
 
         dev = qdev_create(NULL, "empty_slot");
-        s = sysbus_from_qdev(dev);
+        s = SYS_BUS_DEVICE(dev);
         e = FROM_SYSBUS(EmptySlot, s);
         e->size = slot_size;
 
@@ -83,7 +83,7 @@ static void empty_slot_class_init(ObjectClass *klass, void *data)
     k->init = empty_slot_init1;
 }
 
-static TypeInfo empty_slot_info = {
+static const TypeInfo empty_slot_info = {
     .name          = "empty_slot",
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(EmptySlot),

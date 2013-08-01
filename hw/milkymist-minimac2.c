@@ -25,8 +25,8 @@
 #include "hw.h"
 #include "sysbus.h"
 #include "trace.h"
-#include "net.h"
-#include "qemu-error.h"
+#include "net/net.h"
+#include "qemu/error-report.h"
 #include "qdev-addr.h"
 
 #include <zlib.h>
@@ -96,7 +96,7 @@ struct MilkymistMinimac2State {
     NICState *nic;
     NICConf conf;
     char *phy_model;
-    target_phys_addr_t buffers_base;
+    hwaddr buffers_base;
     MemoryRegion buffers;
     MemoryRegion regs_region;
 
@@ -257,7 +257,7 @@ static void minimac2_tx(MilkymistMinimac2State *s)
     trace_milkymist_minimac2_tx_frame(txcount - 12);
 
     /* send packet, skipping preamble and sfd */
-    qemu_send_packet_raw(&s->nic->nc, buf + 8, txcount - 12);
+    qemu_send_packet_raw(qemu_get_queue(s->nic), buf + 8, txcount - 12);
 
     s->regs[R_TXCOUNT] = 0;
 
@@ -280,7 +280,7 @@ static void update_rx_interrupt(MilkymistMinimac2State *s)
 
 static ssize_t minimac2_rx(NetClientState *nc, const uint8_t *buf, size_t size)
 {
-    MilkymistMinimac2State *s = DO_UPCAST(NICState, nc, nc)->opaque;
+    MilkymistMinimac2State *s = qemu_get_nic_opaque(nc);
 
     uint32_t r_count;
     uint32_t r_state;
@@ -323,7 +323,7 @@ static ssize_t minimac2_rx(NetClientState *nc, const uint8_t *buf, size_t size)
 }
 
 static uint64_t
-minimac2_read(void *opaque, target_phys_addr_t addr, unsigned size)
+minimac2_read(void *opaque, hwaddr addr, unsigned size)
 {
     MilkymistMinimac2State *s = opaque;
     uint32_t r = 0;
@@ -352,7 +352,7 @@ minimac2_read(void *opaque, target_phys_addr_t addr, unsigned size)
 }
 
 static void
-minimac2_write(void *opaque, target_phys_addr_t addr, uint64_t value,
+minimac2_write(void *opaque, hwaddr addr, uint64_t value,
                unsigned size)
 {
     MilkymistMinimac2State *s = opaque;
@@ -410,7 +410,7 @@ static const MemoryRegionOps minimac2_ops = {
 
 static int minimac2_can_rx(NetClientState *nc)
 {
-    MilkymistMinimac2State *s = DO_UPCAST(NICState, nc, nc)->opaque;
+    MilkymistMinimac2State *s = qemu_get_nic_opaque(nc);
 
     if (s->regs[R_STATE0] == STATE_LOADED) {
         return 1;
@@ -424,7 +424,7 @@ static int minimac2_can_rx(NetClientState *nc)
 
 static void minimac2_cleanup(NetClientState *nc)
 {
-    MilkymistMinimac2State *s = DO_UPCAST(NICState, nc, nc)->opaque;
+    MilkymistMinimac2State *s = qemu_get_nic_opaque(nc);
 
     s->nic = NULL;
 }
@@ -480,7 +480,7 @@ static int milkymist_minimac2_init(SysBusDevice *dev)
     qemu_macaddr_default_if_unset(&s->conf.macaddr);
     s->nic = qemu_new_nic(&net_milkymist_minimac2_info, &s->conf,
                           object_get_typename(OBJECT(dev)), dev->qdev.id, s);
-    qemu_format_nic_info_str(&s->nic->nc, s->conf.macaddr.a);
+    qemu_format_nic_info_str(qemu_get_queue(s->nic), s->conf.macaddr.a);
 
     return 0;
 }
@@ -535,7 +535,7 @@ static void milkymist_minimac2_class_init(ObjectClass *klass, void *data)
     dc->props = milkymist_minimac2_properties;
 }
 
-static TypeInfo milkymist_minimac2_info = {
+static const TypeInfo milkymist_minimac2_info = {
     .name          = "milkymist-minimac2",
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(MilkymistMinimac2State),

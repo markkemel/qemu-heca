@@ -1,10 +1,13 @@
+#ifndef HW_QXL_H
+#define HW_QXL_H 1
+
 #include "qemu-common.h"
 
-#include "console.h"
+#include "ui/console.h"
 #include "hw.h"
-#include "pci.h"
+#include "pci/pci.h"
 #include "vga_int.h"
-#include "qemu-thread.h"
+#include "qemu/thread.h"
 
 #include "ui/qemu-spice.h"
 #include "ui/spice-display.h"
@@ -129,12 +132,7 @@ typedef struct PCIQXLDevice {
         }                                                               \
     } while (0)
 
-#if 0
-/* spice-server 0.12 is still in development */
 #define QXL_DEFAULT_REVISION QXL_REVISION_STABLE_V12
-#else
-#define QXL_DEFAULT_REVISION QXL_REVISION_STABLE_V10
-#endif
 
 /* qxl.c */
 void *qxl_phys2virt(PCIQXLDevice *qxl, QXLPHYSICAL phys, int group_id);
@@ -163,3 +161,5 @@ void qxl_render_update(PCIQXLDevice *qxl);
 int qxl_render_cursor(PCIQXLDevice *qxl, QXLCommandExt *ext);
 void qxl_render_update_area_done(PCIQXLDevice *qxl, QXLCookie *cookie);
 void qxl_render_update_area_bh(void *opaque);
+
+#endif

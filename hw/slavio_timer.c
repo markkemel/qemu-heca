@@ -23,7 +23,7 @@
  */
 
 #include "sun4m.h"
-#include "qemu-timer.h"
+#include "qemu/timer.h"
 #include "ptimer.h"
 #include "sysbus.h"
 #include "trace.h"
@@ -130,7 +130,7 @@ static void slavio_timer_irq(void *opaque)
     }
 }
 
-static uint64_t slavio_timer_mem_readl(void *opaque, target_phys_addr_t addr,
+static uint64_t slavio_timer_mem_readl(void *opaque, hwaddr addr,
                                        unsigned size)
 {
     TimerContext *tc = opaque;
@@ -190,7 +190,7 @@ static uint64_t slavio_timer_mem_readl(void *opaque, target_phys_addr_t addr,
     return ret;
 }
 
-static void slavio_timer_mem_writel(void *opaque, target_phys_addr_t addr,
+static void slavio_timer_mem_writel(void *opaque, hwaddr addr,
                                     uint64_t val, unsigned size)
 {
     TimerContext *tc = opaque;
@@ -420,7 +420,7 @@ static void slavio_timer_class_init(ObjectClass *klass, void *data)
     dc->props = slavio_timer_properties;
 }
 
-static TypeInfo slavio_timer_info = {
+static const TypeInfo slavio_timer_info = {
     .name          = "slavio_timer",
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(SLAVIO_TIMERState),

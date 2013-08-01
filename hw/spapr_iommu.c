@@ -17,10 +17,11 @@
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
 #include "hw.h"
-#include "kvm.h"
+#include "sysemu/kvm.h"
 #include "qdev.h"
 #include "kvm_ppc.h"
-#include "dma.h"
+#include "sysemu/dma.h"
+#include "exec/address-spaces.h"
 
 #include "hw/spapr.h"
 
@@ -65,8 +66,8 @@ static sPAPRTCETable *spapr_tce_find_by_liobn(uint32_t liobn)
 
 static int spapr_tce_translate(DMAContext *dma,
                                dma_addr_t addr,
-                               target_phys_addr_t *paddr,
-                               target_phys_addr_t *len,
+                               hwaddr *paddr,
+                               hwaddr *len,
                                DMADirection dir)
 {
     sPAPRTCETable *tcet = DO_UPCAST(sPAPRTCETable, dma, dma);
@@ -81,7 +82,7 @@ static int spapr_tce_translate(DMAContext *dma,
 
     if (tcet->bypass) {
         *paddr = addr;
-        *len = (target_phys_addr_t)-1;
+        *len = (hwaddr)-1;
         return 0;
     }
 
@@ -119,12 +120,18 @@ DMAContext *spapr_tce_new_dma_context(uint32_t liobn, size_t window_size)
 {
     sPAPRTCETable *tcet;
 
+    if (spapr_tce_find_by_liobn(liobn)) {
+        fprintf(stderr, "Attempted to create TCE table with duplicate"
+                " LIOBN 0x%x\n", liobn);
+        return NULL;
+    }
+
     if (!window_size) {
         return NULL;
     }
 
     tcet = g_malloc0(sizeof(*tcet));
-    dma_context_init(&tcet->dma, spapr_tce_translate, NULL, NULL);
+    dma_context_init(&tcet->dma, &address_space_memory, spapr_tce_translate, NULL, NULL);
 
     tcet->liobn = liobn;
     tcet->window_size = window_size;
@@ -203,7 +210,7 @@ static target_ulong put_tce_emu(sPAPRTCETable *tcet, target_ulong ioba,
     return H_SUCCESS;
 }
 
-static target_ulong h_put_tce(CPUPPCState *env, sPAPREnvironment *spapr,
+static target_ulong h_put_tce(PowerPCCPU *cpu, sPAPREnvironment *spapr,
                               target_ulong opcode, target_ulong *args)
 {
     target_ulong liobn = args[0];

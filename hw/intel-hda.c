@@ -18,13 +18,13 @@
  */
 
 #include "hw.h"
-#include "pci.h"
-#include "msi.h"
-#include "qemu-timer.h"
+#include "pci/pci.h"
+#include "pci/msi.h"
+#include "qemu/timer.h"
 #include "audiodev.h"
 #include "intel-hda.h"
 #include "intel-hda-defs.h"
-#include "dma.h"
+#include "sysemu/dma.h"
 
 /* --------------------------------------------------------------------- */
 /* hda bus                                                               */
@@ -206,9 +206,9 @@ static void intel_hda_reset(DeviceState *dev);
 
 /* --------------------------------------------------------------------- */
 
-static target_phys_addr_t intel_hda_addr(uint32_t lbase, uint32_t ubase)
+static hwaddr intel_hda_addr(uint32_t lbase, uint32_t ubase)
 {
-    target_phys_addr_t addr;
+    hwaddr addr;
 
     addr = ((uint64_t)ubase << 32) | lbase;
     return addr;
@@ -295,7 +295,7 @@ static int intel_hda_send_command(IntelHDAState *d, uint32_t verb)
 
 static void intel_hda_corb_run(IntelHDAState *d)
 {
-    target_phys_addr_t addr;
+    hwaddr addr;
     uint32_t rp, verb;
 
     if (d->ics & ICH6_IRS_BUSY) {
@@ -332,7 +332,7 @@ static void intel_hda_response(HDACodecDevice *dev, bool solicited, uint32_t res
 {
     HDACodecBus *bus = DO_UPCAST(HDACodecBus, qbus, dev->qdev.parent_bus);
     IntelHDAState *d = container_of(bus, IntelHDAState, codecs);
-    target_phys_addr_t addr;
+    hwaddr addr;
     uint32_t wp, ex;
 
     if (d->ics & ICH6_IRS_BUSY) {
@@ -381,7 +381,7 @@ static bool intel_hda_xfer(HDACodecDevice *dev, uint32_t stnr, bool output,
 {
     HDACodecBus *bus = DO_UPCAST(HDACodecBus, qbus, dev->qdev.parent_bus);
     IntelHDAState *d = container_of(bus, IntelHDAState, codecs);
-    target_phys_addr_t addr;
+    hwaddr addr;
     uint32_t s, copy, left;
     IntelHDAStream *st;
     bool irq = false;
@@ -453,7 +453,7 @@ static bool intel_hda_xfer(HDACodecDevice *dev, uint32_t stnr, bool output,
 
 static void intel_hda_parse_bdl(IntelHDAState *d, IntelHDAStream *st)
 {
-    target_phys_addr_t addr;
+    hwaddr addr;
     uint8_t buf[16];
     uint32_t i;
 
@@ -890,7 +890,7 @@ static const struct IntelHDAReg regtab[] = {
 
 };
 
-static const IntelHDAReg *intel_hda_reg_find(IntelHDAState *d, target_phys_addr_t addr)
+static const IntelHDAReg *intel_hda_reg_find(IntelHDAState *d, hwaddr addr)
 {
     const IntelHDAReg *reg;
 
@@ -1033,7 +1033,7 @@ static void intel_hda_regs_reset(IntelHDAState *d)
 
 /* --------------------------------------------------------------------- */
 
-static void intel_hda_mmio_writeb(void *opaque, target_phys_addr_t addr, uint32_t val)
+static void intel_hda_mmio_writeb(void *opaque, hwaddr addr, uint32_t val)
 {
     IntelHDAState *d = opaque;
     const IntelHDAReg *reg = intel_hda_reg_find(d, addr);
@@ -1041,7 +1041,7 @@ static void intel_hda_mmio_writeb(void *opaque, target_phys_addr_t addr, uint32_
     intel_hda_reg_write(d, reg, val, 0xff);
 }
 
-static void intel_hda_mmio_writew(void *opaque, target_phys_addr_t addr, uint32_t val)
+static void intel_hda_mmio_writew(void *opaque, hwaddr addr, uint32_t val)
 {
     IntelHDAState *d = opaque;
     const IntelHDAReg *reg = intel_hda_reg_find(d, addr);
@@ -1049,7 +1049,7 @@ static void intel_hda_mmio_writew(void *opaque, target_phys_addr_t addr, uint32_
     intel_hda_reg_write(d, reg, val, 0xffff);
 }
 
-static void intel_hda_mmio_writel(void *opaque, target_phys_addr_t addr, uint32_t val)
+static void intel_hda_mmio_writel(void *opaque, hwaddr addr, uint32_t val)
 {
     IntelHDAState *d = opaque;
     const IntelHDAReg *reg = intel_hda_reg_find(d, addr);
@@ -1057,7 +1057,7 @@ static void intel_hda_mmio_writel(void *opaque, target_phys_addr_t addr, uint32_
     intel_hda_reg_write(d, reg, val, 0xffffffff);
 }
 
-static uint32_t intel_hda_mmio_readb(void *opaque, target_phys_addr_t addr)
+static uint32_t intel_hda_mmio_readb(void *opaque, hwaddr addr)
 {
     IntelHDAState *d = opaque;
     const IntelHDAReg *reg = intel_hda_reg_find(d, addr);
@@ -1065,7 +1065,7 @@ static uint32_t intel_hda_mmio_readb(void *opaque, target_phys_addr_t addr)
     return intel_hda_reg_read(d, reg, 0xff);
 }
 
-static uint32_t intel_hda_mmio_readw(void *opaque, target_phys_addr_t addr)
+static uint32_t intel_hda_mmio_readw(void *opaque, hwaddr addr)
 {
     IntelHDAState *d = opaque;
     const IntelHDAReg *reg = intel_hda_reg_find(d, addr);
@@ -1073,7 +1073,7 @@ static uint32_t intel_hda_mmio_readw(void *opaque, target_phys_addr_t addr)
     return intel_hda_reg_read(d, reg, 0xffff);
 }
 
-static uint32_t intel_hda_mmio_readl(void *opaque, target_phys_addr_t addr)
+static uint32_t intel_hda_mmio_readl(void *opaque, hwaddr addr)
 {
     IntelHDAState *d = opaque;
     const IntelHDAReg *reg = intel_hda_reg_find(d, addr);
@@ -1232,7 +1232,7 @@ static Property intel_hda_properties[] = {
     DEFINE_PROP_END_OF_LIST(),
 };
 
-static void intel_hda_class_init(ObjectClass *klass, void *data)
+static void intel_hda_class_init_common(ObjectClass *klass)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
     PCIDeviceClass *k = PCI_DEVICE_CLASS(klass);
@@ -1240,20 +1240,46 @@ static void intel_hda_class_init(ObjectClass *klass, void *data)
     k->init = intel_hda_init;
     k->exit = intel_hda_exit;
     k->vendor_id = PCI_VENDOR_ID_INTEL;
-    k->device_id = 0x2668;
-    k->revision = 1;
     k->class_id = PCI_CLASS_MULTIMEDIA_HD_AUDIO;
-    dc->desc = "Intel HD Audio Controller";
     dc->reset = intel_hda_reset;
     dc->vmsd = &vmstate_intel_hda;
     dc->props = intel_hda_properties;
 }
 
-static TypeInfo intel_hda_info = {
+static void intel_hda_class_init_ich6(ObjectClass *klass, void *data)
+{
+    DeviceClass *dc = DEVICE_CLASS(klass);
+    PCIDeviceClass *k = PCI_DEVICE_CLASS(klass);
+
+    intel_hda_class_init_common(klass);
+    k->device_id = 0x2668;
+    k->revision = 1;
+    dc->desc = "Intel HD Audio Controller (ich6)";
+}
+
+static void intel_hda_class_init_ich9(ObjectClass *klass, void *data)
+{
+    DeviceClass *dc = DEVICE_CLASS(klass);
+    PCIDeviceClass *k = PCI_DEVICE_CLASS(klass);
+
+    intel_hda_class_init_common(klass);
+    k->device_id = 0x293e;
+    k->revision = 3;
+    dc->desc = "Intel HD Audio Controller (ich9)";
+}
+
+static const TypeInfo intel_hda_info_ich6 = {
     .name          = "intel-hda",
     .parent        = TYPE_PCI_DEVICE,
     .instance_size = sizeof(IntelHDAState),
-    .class_init    = intel_hda_class_init,
+    .class_init    = intel_hda_class_init_ich6,
+};
+
+static const TypeInfo intel_hda_info_ich9 = {
+    .name          = "ich9-intel-hda",
+    .parent        = TYPE_PCI_DEVICE,
+    .instance_size = sizeof(IntelHDAState),
+    .class_init    = intel_hda_class_init_ich9,
 };
 
 static void hda_codec_device_class_init(ObjectClass *klass, void *data)
@@ -1265,7 +1291,7 @@ static void hda_codec_device_class_init(ObjectClass *klass, void *data)
     k->props = hda_props;
 }
 
-static TypeInfo hda_codec_device_type_info = {
+static const TypeInfo hda_codec_device_type_info = {
     .name = TYPE_HDA_CODEC_DEVICE,
     .parent = TYPE_DEVICE,
     .instance_size = sizeof(HDACodecDevice),
@@ -1277,7 +1303,8 @@ static TypeInfo hda_codec_device_type_info = {
 static void intel_hda_register_types(void)
 {
     type_register_static(&hda_codec_bus_info);
-    type_register_static(&intel_hda_info);
+    type_register_static(&intel_hda_info_ich6);
+    type_register_static(&intel_hda_info_ich9);
     type_register_static(&hda_codec_device_type_info);
 }
 

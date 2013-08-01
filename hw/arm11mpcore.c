@@ -8,7 +8,7 @@
  */
 
 #include "sysbus.h"
-#include "qemu-timer.h"
+#include "qemu/timer.h"
 
 /* MPCore private memory region.  */
 
@@ -27,7 +27,7 @@ typedef struct mpcore_priv_state {
 
 /* Per-CPU private memory mapped IO.  */
 
-static uint64_t mpcore_scu_read(void *opaque, target_phys_addr_t offset,
+static uint64_t mpcore_scu_read(void *opaque, hwaddr offset,
                                 unsigned size)
 {
     mpcore_priv_state *s = (mpcore_priv_state *)opaque;
@@ -44,11 +44,13 @@ static uint64_t mpcore_scu_read(void *opaque, target_phys_addr_t offset,
     case 0x0c: /* Invalidate all.  */
         return 0;
     default:
-        hw_error("mpcore_priv_read: Bad offset %x\n", (int)offset);
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "mpcore_priv_read: Bad offset %x\n", (int)offset);
+        return 0;
     }
 }
 
-static void mpcore_scu_write(void *opaque, target_phys_addr_t offset,
+static void mpcore_scu_write(void *opaque, hwaddr offset,
                              uint64_t value, unsigned size)
 {
     mpcore_priv_state *s = (mpcore_priv_state *)opaque;
@@ -61,7 +63,8 @@ static void mpcore_scu_write(void *opaque, target_phys_addr_t offset,
         /* This is a no-op as cache is not emulated.  */
         break;
     default:
-        hw_error("mpcore_priv_read: Bad offset %x\n", (int)offset);
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "mpcore_priv_read: Bad offset %x\n", (int)offset);
     }
 }
 
@@ -80,8 +83,8 @@ static void mpcore_priv_set_irq(void *opaque, int irq, int level)
 static void mpcore_priv_map_setup(mpcore_priv_state *s)
 {
     int i;
-    SysBusDevice *gicbusdev = sysbus_from_qdev(s->gic);
-    SysBusDevice *busdev = sysbus_from_qdev(s->mptimer);
+    SysBusDevice *gicbusdev = SYS_BUS_DEVICE(s->gic);
+    SysBusDevice *busdev = SYS_BUS_DEVICE(s->mptimer);
     memory_region_init(&s->container, "mpcode-priv-container", 0x2000);
     memory_region_init_io(&s->iomem, &mpcore_scu_ops, s, "mpcore-scu", 0x100);
     memory_region_add_subregion(&s->container, 0, &s->iomem);
@@ -89,7 +92,7 @@ static void mpcore_priv_map_setup(mpcore_priv_state *s)
      * at 0x200, 0x300...
      */
     for (i = 0; i < (s->num_cpu + 1); i++) {
-        target_phys_addr_t offset = 0x100 + (i * 0x100);
+        hwaddr offset = 0x100 + (i * 0x100);
         memory_region_add_subregion(&s->container, offset,
                                     sysbus_mmio_get_region(gicbusdev, i + 1));
     }
@@ -98,7 +101,7 @@ static void mpcore_priv_map_setup(mpcore_priv_state *s)
      */
     for (i = 0; i < (s->num_cpu + 1) * 2; i++) {
         /* Timers at 0x600, 0x700, ...; watchdogs at 0x620, 0x720, ... */
-        target_phys_addr_t offset = 0x600 + (i >> 1) * 0x100 + (i & 1) * 0x20;
+        hwaddr offset = 0x600 + (i >> 1) * 0x100 + (i & 1) * 0x20;
         memory_region_add_subregion(&s->container, offset,
                                     sysbus_mmio_get_region(busdev, i));
     }
@@ -128,7 +131,7 @@ static int mpcore_priv_init(SysBusDevice *dev)
     qdev_init_nofail(s->gic);
 
     /* Pass through outbound IRQ lines from the GIC */
-    sysbus_pass_irq(dev, sysbus_from_qdev(s->gic));
+    sysbus_pass_irq(dev, SYS_BUS_DEVICE(s->gic));
 
     /* Pass through inbound GPIO lines to the GIC */
     qdev_init_gpio_in(&s->busdev.qdev, mpcore_priv_set_irq, s->num_irq - 32);
@@ -187,7 +190,7 @@ static int realview_mpcore_init(SysBusDevice *dev)
     priv = qdev_create(NULL, "arm11mpcore_priv");
     qdev_prop_set_uint32(priv, "num-cpu", s->num_cpu);
     qdev_init_nofail(priv);
-    s->priv = sysbus_from_qdev(priv);
+    s->priv = SYS_BUS_DEVICE(priv);
     sysbus_pass_irq(dev, s->priv);
     for (i = 0; i < 32; i++) {
         s->cpuic[i] = qdev_get_gpio_in(priv, i);
@@ -219,7 +222,7 @@ static void mpcore_rirq_class_init(ObjectClass *klass, void *data)
     dc->props = mpcore_rirq_properties;
 }
 
-static TypeInfo mpcore_rirq_info = {
+static const TypeInfo mpcore_rirq_info = {
     .name          = "realview_mpcore",
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(mpcore_rirq_state),
@@ -249,7 +252,7 @@ static void mpcore_priv_class_init(ObjectClass *klass, void *data)
     dc->props = mpcore_priv_properties;
 }
 
-static TypeInfo mpcore_priv_info = {
+static const TypeInfo mpcore_priv_info = {
     .name          = "arm11mpcore_priv",
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(mpcore_priv_state),

@@ -23,6 +23,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#ifndef TCG_TARGET_MIPS 
 #define TCG_TARGET_MIPS 1
 
 #ifdef __MIPSEB__
@@ -116,9 +117,6 @@ typedef enum {
 
 #define TCG_AREG0 TCG_REG_S0
 
-/* guest base is supported */
-#define TCG_TARGET_HAS_GUEST_BASE
-
 #ifdef __OpenBSD__
 #include <machine/sysarch.h>
 #else
@@ -130,3 +128,5 @@ static inline void flush_icache_range(tcg_target_ulong start,
 {
     cacheflush ((void *)start, stop-start, ICACHE);
 }
+
+#endif

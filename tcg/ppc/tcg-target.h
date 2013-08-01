@@ -21,6 +21,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#ifndef TCG_TARGET_PPC 
 #define TCG_TARGET_PPC 1
 
 #define TCG_TARGET_WORDS_BIGENDIAN
@@ -96,8 +97,8 @@ typedef enum {
 
 #define TCG_AREG0 TCG_REG_R27
 
-#define TCG_TARGET_HAS_GUEST_BASE
-
 #define tcg_qemu_tb_exec(env, tb_ptr) \
     ((long __attribute__ ((longcall)) \
       (*)(void *, void *))code_gen_prologue)(env, tb_ptr)
+
+#endif

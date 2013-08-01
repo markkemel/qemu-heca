@@ -52,7 +52,7 @@ static void sbi_set_irq(void *opaque, int irq, int level)
 {
 }
 
-static uint64_t sbi_mem_read(void *opaque, target_phys_addr_t addr,
+static uint64_t sbi_mem_read(void *opaque, hwaddr addr,
                              unsigned size)
 {
     SBIState *s = opaque;
@@ -69,7 +69,7 @@ static uint64_t sbi_mem_read(void *opaque, target_phys_addr_t addr,
     return ret;
 }
 
-static void sbi_mem_write(void *opaque, target_phys_addr_t addr,
+static void sbi_mem_write(void *opaque, hwaddr addr,
                           uint64_t val, unsigned dize)
 {
     SBIState *s = opaque;
@@ -141,7 +141,7 @@ static void sbi_class_init(ObjectClass *klass, void *data)
     dc->vmsd = &vmstate_sbi;
 }
 
-static TypeInfo sbi_info = {
+static const TypeInfo sbi_info = {
     .name          = "sbi",
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(SBIState),

@@ -16,10 +16,10 @@
  *  along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "nbd.h"
-#include "block.h"
+#include "block/nbd.h"
+#include "block/block.h"
 
-#include "qemu-coroutine.h"
+#include "block/coroutine.h"
 
 #include <errno.h>
 #include <string.h>
@@ -36,8 +36,8 @@
 #include <linux/fs.h>
 #endif
 
-#include "qemu_socket.h"
-#include "qemu-queue.h"
+#include "qemu/sockets.h"
+#include "qemu/queue.h"
 
 //#define DEBUG_NBD
 
@@ -208,7 +208,14 @@ int tcp_socket_outgoing(const char *address, uint16_t port)
 
 int tcp_socket_outgoing_spec(const char *address_and_port)
 {
-    return inet_connect(address_and_port, NULL);
+    Error *local_err = NULL;
+    int fd = inet_connect(address_and_port, &local_err);
+
+    if (local_err != NULL) {
+        qerror_report_err(local_err);
+        error_free(local_err);
+    }
+    return fd;
 }
 
 int tcp_socket_incoming(const char *address, uint16_t port)
@@ -220,22 +227,38 @@ int tcp_socket_incoming(const char *address, uint16_t port)
 
 int tcp_socket_incoming_spec(const char *address_and_port)
 {
-    char *ostr  = NULL;
-    int olen = 0;
-    return inet_listen(address_and_port, ostr, olen, SOCK_STREAM, 0, NULL);
+    Error *local_err = NULL;
+    int fd = inet_listen(address_and_port, NULL, 0, SOCK_STREAM, 0, &local_err);
+
+    if (local_err != NULL) {
+        qerror_report_err(local_err);
+        error_free(local_err);
+    }
+    return fd;
 }
 
 int unix_socket_incoming(const char *path)
 {
-    char *ostr = NULL;
-    int olen = 0;
+    Error *local_err = NULL;
+    int fd = unix_listen(path, NULL, 0, &local_err);
 
-    return unix_listen(path, ostr, olen);
+    if (local_err != NULL) {
+        qerror_report_err(local_err);
+        error_free(local_err);
+    }
+    return fd;
 }
 
 int unix_socket_outgoing(const char *path)
 {
-    return unix_connect(path);
+    Error *local_err = NULL;
+    int fd = unix_connect(path, &local_err);
+
+    if (local_err != NULL) {
+        qerror_report_err(local_err);
+        error_free(local_err);
+    }
+    return fd;
 }
 
 /* Basic flow for negotiation
@@ -374,6 +397,7 @@ static int nbd_send_negotiate(NBDClient *client)
     rc = -EINVAL;
 
     TRACE("Beginning negotiation.");
+    memset(buf, 0, sizeof(buf));
     memcpy(buf, "NBDMAGIC", 8);
     if (client->exp) {
         assert ((client->exp->nbdflags & ~65535) == 0);
@@ -383,7 +407,6 @@ static int nbd_send_negotiate(NBDClient *client)
     } else {
         cpu_to_be64w((uint64_t*)(buf + 8), NBD_OPTS_MAGIC);
     }
-    memset(buf + 28, 0, 124);
 
     if (client->exp) {
         if (write_sync(csock, buf, sizeof(buf)) != sizeof(buf)) {
@@ -573,22 +596,21 @@ int nbd_init(int fd, int csock, uint32_t flags, off_t size, size_t blocksize)
         return -serrno;
     }
 
-    if (flags & NBD_FLAG_READ_ONLY) {
-        int read_only = 1;
-        TRACE("Setting readonly attribute");
+    if (ioctl(fd, NBD_SET_FLAGS, flags) < 0) {
+        if (errno == ENOTTY) {
+            int read_only = (flags & NBD_FLAG_READ_ONLY) != 0;
+            TRACE("Setting readonly attribute");
 
-        if (ioctl(fd, BLKROSET, (unsigned long) &read_only) < 0) {
+            if (ioctl(fd, BLKROSET, (unsigned long) &read_only) < 0) {
+                int serrno = errno;
+                LOG("Failed setting read-only attribute");
+                return -serrno;
+            }
+        } else {
             int serrno = errno;
-            LOG("Failed setting read-only attribute");
+            LOG("Failed setting flags");
             return -serrno;
         }
-    }
-
-    if (ioctl(fd, NBD_SET_FLAGS, flags) < 0
-        && errno != ENOTTY) {
-        int serrno = errno;
-        LOG("Failed setting flags");
-        return -serrno;
     }
 
     TRACE("Negotiation ended");

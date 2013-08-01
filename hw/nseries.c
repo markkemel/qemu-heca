@@ -19,11 +19,11 @@
  */
 
 #include "qemu-common.h"
-#include "sysemu.h"
+#include "sysemu/sysemu.h"
 #include "omap.h"
 #include "arm-misc.h"
 #include "irq.h"
-#include "console.h"
+#include "ui/console.h"
 #include "boards.h"
 #include "i2c.h"
 #include "devices.h"
@@ -31,9 +31,9 @@
 #include "hw.h"
 #include "bt.h"
 #include "loader.h"
-#include "blockdev.h"
+#include "sysemu/blockdev.h"
 #include "sysbus.h"
-#include "exec-memory.h"
+#include "exec/address-spaces.h"
 
 /* Nokia N8x0 support */
 struct n800_s {
@@ -178,10 +178,10 @@ static void n8x0_nand_setup(struct n800_s *s)
         qdev_prop_set_drive_nofail(s->nand, "drive", dinfo->bdrv);
     }
     qdev_init_nofail(s->nand);
-    sysbus_connect_irq(sysbus_from_qdev(s->nand), 0,
+    sysbus_connect_irq(SYS_BUS_DEVICE(s->nand), 0,
                        qdev_get_gpio_in(s->mpu->gpio, N8X0_ONENAND_GPIO));
     omap_gpmc_attach(s->mpu->gpmc, N8X0_ONENAND_CS,
-                     sysbus_mmio_get_region(sysbus_from_qdev(s->nand), 0));
+                     sysbus_mmio_get_region(SYS_BUS_DEVICE(s->nand), 0));
     otp_region = onenand_raw_otp(s->nand);
 
     memcpy(otp_region + 0x000, n8x0_cal_wlan_mac, sizeof(n8x0_cal_wlan_mac));
@@ -783,7 +783,7 @@ static void n8x0_usb_setup(struct n800_s *s)
 {
     SysBusDevice *dev;
     s->usb = qdev_create(NULL, "tusb6010");
-    dev = sysbus_from_qdev(s->usb);
+    dev = SYS_BUS_DEVICE(s->usb);
     qdev_init_nofail(s->usb);
     sysbus_connect_irq(dev, 0,
                        qdev_get_gpio_in(s->mpu->gpio, N8X0_TUSB_INT_GPIO));
@@ -1284,17 +1284,15 @@ static int n810_atag_setup(const struct arm_boot_info *info, void *p)
     return n8x0_atag_setup(p, 810);
 }
 
-static void n8x0_init(ram_addr_t ram_size, const char *boot_device,
-                const char *kernel_filename,
-                const char *kernel_cmdline, const char *initrd_filename,
-                const char *cpu_model, struct arm_boot_info *binfo, int model)
+static void n8x0_init(QEMUMachineInitArgs *args,
+                      struct arm_boot_info *binfo, int model)
 {
     MemoryRegion *sysmem = get_system_memory();
     struct n800_s *s = (struct n800_s *) g_malloc0(sizeof(*s));
     int sdram_size = binfo->ram_size;
     DisplayState *ds;
 
-    s->mpu = omap2420_mpu_init(sysmem, sdram_size, cpu_model);
+    s->mpu = omap2420_mpu_init(sysmem, sdram_size, args->cpu_model);
 
     /* Setup peripherals
      *
@@ -1334,20 +1332,22 @@ static void n8x0_init(ram_addr_t ram_size, const char *boot_device,
     n8x0_dss_setup(s);
     n8x0_cbus_setup(s);
     n8x0_uart_setup(s);
-    if (usb_enabled)
+    if (usb_enabled(false)) {
         n8x0_usb_setup(s);
+    }
 
-    if (kernel_filename) {
+    if (args->kernel_filename) {
         /* Or at the linux loader.  */
-        binfo->kernel_filename = kernel_filename;
-        binfo->kernel_cmdline = kernel_cmdline;
-        binfo->initrd_filename = initrd_filename;
+        binfo->kernel_filename = args->kernel_filename;
+        binfo->kernel_cmdline = args->kernel_cmdline;
+        binfo->initrd_filename = args->initrd_filename;
         arm_load_kernel(s->mpu->cpu, binfo);
 
         qemu_register_reset(n8x0_boot_init, s);
     }
 
-    if (option_rom[0].name && (boot_device[0] == 'n' || !kernel_filename)) {
+    if (option_rom[0].name &&
+        (args->boot_device[0] == 'n' || !args->kernel_filename)) {
         int rom_size;
         uint8_t nolo_tags[0x10000];
         /* No, wait, better start at the ROM.  */
@@ -1375,7 +1375,7 @@ static void n8x0_init(ram_addr_t ram_size, const char *boot_device,
        size until the guest activates the display.  */
     ds = get_displaystate();
     ds->surface = qemu_resize_displaysurface(ds, 800, 480);
-    dpy_resize(ds);
+    dpy_gfx_resize(ds);
 }
 
 static struct arm_boot_info n800_binfo = {
@@ -1397,36 +1397,28 @@ static struct arm_boot_info n810_binfo = {
     .atag_board = n810_atag_setup,
 };
 
-static void n800_init(ram_addr_t ram_size,
-                const char *boot_device,
-                const char *kernel_filename, const char *kernel_cmdline,
-                const char *initrd_filename, const char *cpu_model)
+static void n800_init(QEMUMachineInitArgs *args)
 {
-    return n8x0_init(ram_size, boot_device,
-                    kernel_filename, kernel_cmdline, initrd_filename,
-                    cpu_model, &n800_binfo, 800);
+    return n8x0_init(args, &n800_binfo, 800);
 }
 
-static void n810_init(ram_addr_t ram_size,
-                const char *boot_device,
-                const char *kernel_filename, const char *kernel_cmdline,
-                const char *initrd_filename, const char *cpu_model)
+static void n810_init(QEMUMachineInitArgs *args)
 {
-    return n8x0_init(ram_size, boot_device,
-                    kernel_filename, kernel_cmdline, initrd_filename,
-                    cpu_model, &n810_binfo, 810);
+    return n8x0_init(args, &n810_binfo, 810);
 }
 
 static QEMUMachine n800_machine = {
     .name = "n800",
     .desc = "Nokia N800 tablet aka. RX-34 (OMAP2420)",
     .init = n800_init,
+    DEFAULT_MACHINE_OPTIONS,
 };
 
 static QEMUMachine n810_machine = {
     .name = "n810",
     .desc = "Nokia N810 tablet aka. RX-44 (OMAP2420)",
     .init = n810_init,
+    DEFAULT_MACHINE_OPTIONS,
 };
 
 static void nseries_machine_init(void)

@@ -8,15 +8,15 @@
  */
 
 #include "qemu-common.h"
-#include "qemu-option.h"
-#include "qemu-config.h"
+#include "qemu/option.h"
+#include "qemu/config-file.h"
 #include "hw/usb.h"
 #include "hw/usb/desc.h"
 #include "hw/scsi.h"
-#include "console.h"
-#include "monitor.h"
-#include "sysemu.h"
-#include "blockdev.h"
+#include "ui/console.h"
+#include "monitor/monitor.h"
+#include "sysemu/sysemu.h"
+#include "sysemu/blockdev.h"
 
 //#define DEBUG_MSD
 
@@ -54,12 +54,12 @@ typedef struct {
     struct usb_msd_csw csw;
     SCSIRequest *req;
     SCSIBus bus;
-    BlockConf conf;
-    char *serial;
-    SCSIDevice *scsi_dev;
-    uint32_t removable;
     /* For async completion.  */
     USBPacket *packet;
+    /* usb-storage only */
+    BlockConf conf;
+    char *serial;
+    uint32_t removable;
 } MSDState;
 
 struct usb_msd_cbw {
@@ -215,7 +215,7 @@ static const USBDesc desc = {
 static void usb_msd_copy_data(MSDState *s, USBPacket *p)
 {
     uint32_t len;
-    len = p->iov.size - p->result;
+    len = p->iov.size - p->actual_length;
     if (len > s->scsi_len)
         len = s->scsi_len;
     usb_packet_copy(p, scsi_req_get_buf(s->req) + s->scsi_off, len);
@@ -263,7 +263,8 @@ static void usb_msd_transfer_data(SCSIRequest *req, uint32_t len)
     if (p) {
         usb_msd_copy_data(s, p);
         p = s->packet;
-        if (p && p->result == p->iov.size) {
+        if (p && p->actual_length == p->iov.size) {
+            p->status = USB_RET_SUCCESS; /* Clear previous ASYNC status */
             usb_msd_packet_complete(s);
         }
     }
@@ -292,7 +293,7 @@ static void usb_msd_command_complete(SCSIRequest *req, uint32_t status, size_t r
             s->mode = USB_MSDM_CBW;
         } else {
             if (s->data_len) {
-                int len = (p->iov.size - p->result);
+                int len = (p->iov.size - p->actual_length);
                 usb_packet_skip(p, len);
                 s->data_len -= len;
             }
@@ -300,6 +301,7 @@ static void usb_msd_command_complete(SCSIRequest *req, uint32_t status, size_t r
                 s->mode = USB_MSDM_CSW;
             }
         }
+        p->status = USB_RET_SUCCESS; /* Clear previous ASYNC status */
         usb_msd_packet_complete(s);
     } else if (s->data_len == 0) {
         s->mode = USB_MSDM_CSW;
@@ -330,44 +332,53 @@ static void usb_msd_handle_reset(USBDevice *dev)
     assert(s->req == NULL);
 
     if (s->packet) {
-        s->packet->result = USB_RET_STALL;
+        s->packet->status = USB_RET_STALL;
         usb_msd_packet_complete(s);
     }
 
     s->mode = USB_MSDM_CBW;
 }
 
-static int usb_msd_handle_control(USBDevice *dev, USBPacket *p,
+static void usb_msd_handle_control(USBDevice *dev, USBPacket *p,
                int request, int value, int index, int length, uint8_t *data)
 {
     MSDState *s = (MSDState *)dev;
-    int ret;
+    SCSIDevice *scsi_dev;
+    int ret, maxlun;
 
     ret = usb_desc_handle_control(dev, p, request, value, index, length, data);
     if (ret >= 0) {
-        return ret;
+        return;
     }
 
-    ret = 0;
     switch (request) {
     case EndpointOutRequest | USB_REQ_CLEAR_FEATURE:
-        ret = 0;
         break;
         /* Class specific requests.  */
     case ClassInterfaceOutRequest | MassStorageReset:
         /* Reset state ready for the next CBW.  */
         s->mode = USB_MSDM_CBW;
-        ret = 0;
         break;
     case ClassInterfaceRequest | GetMaxLun:
-        data[0] = 0;
-        ret = 1;
+        maxlun = 0;
+        for (;;) {
+            scsi_dev = scsi_device_find(&s->bus, 0, 0, maxlun+1);
+            if (scsi_dev == NULL) {
+                break;
+            }
+            if (scsi_dev->lun != maxlun+1) {
+                break;
+            }
+            maxlun++;
+        }
+        DPRINTF("MaxLun %d\n", maxlun);
+        data[0] = maxlun;
+        p->actual_length = 1;
         break;
     default:
-        ret = USB_RET_STALL;
+        p->status = USB_RET_STALL;
         break;
     }
-    return ret;
 }
 
 static void usb_msd_cancel_io(USBDevice *dev, USBPacket *p)
@@ -382,13 +393,13 @@ static void usb_msd_cancel_io(USBDevice *dev, USBPacket *p)
     }
 }
 
-static int usb_msd_handle_data(USBDevice *dev, USBPacket *p)
+static void usb_msd_handle_data(USBDevice *dev, USBPacket *p)
 {
     MSDState *s = (MSDState *)dev;
     uint32_t tag;
-    int ret = 0;
     struct usb_msd_cbw cbw;
     uint8_t devep = p->ep->nr;
+    SCSIDevice *scsi_dev;
 
     switch (p->pid) {
     case USB_TOKEN_OUT:
@@ -408,7 +419,8 @@ static int usb_msd_handle_data(USBDevice *dev, USBPacket *p)
                 goto fail;
             }
             DPRINTF("Command on LUN %d\n", cbw.lun);
-            if (cbw.lun != 0) {
+            scsi_dev = scsi_device_find(&s->bus, 0, 0, cbw.lun);
+            if (scsi_dev == NULL) {
                 fprintf(stderr, "usb-msd: Bad LUN %d\n", cbw.lun);
                 goto fail;
             }
@@ -425,7 +437,7 @@ static int usb_msd_handle_data(USBDevice *dev, USBPacket *p)
                     tag, cbw.flags, cbw.cmd_len, s->data_len);
             assert(le32_to_cpu(s->csw.residue) == 0);
             s->scsi_len = 0;
-            s->req = scsi_req_new(s->scsi_dev, tag, 0, cbw.cmd, NULL);
+            s->req = scsi_req_new(scsi_dev, tag, cbw.lun, cbw.cmd, NULL);
 #ifdef DEBUG_MSD
             scsi_req_print(s->req);
 #endif
@@ -433,7 +445,6 @@ static int usb_msd_handle_data(USBDevice *dev, USBPacket *p)
             if (s->req && s->req->cmd.xfer != SCSI_XFER_NONE) {
                 scsi_req_continue(s->req);
             }
-            ret = p->result;
             break;
 
         case USB_MSDM_DATAOUT:
@@ -446,7 +457,7 @@ static int usb_msd_handle_data(USBDevice *dev, USBPacket *p)
                 usb_msd_copy_data(s, p);
             }
             if (le32_to_cpu(s->csw.residue)) {
-                int len = p->iov.size - p->result;
+                int len = p->iov.size - p->actual_length;
                 if (len) {
                     usb_packet_skip(p, len);
                     s->data_len -= len;
@@ -455,12 +466,10 @@ static int usb_msd_handle_data(USBDevice *dev, USBPacket *p)
                     }
                 }
             }
-            if (p->result < p->iov.size) {
+            if (p->actual_length < p->iov.size) {
                 DPRINTF("Deferring packet %p [wait data-out]\n", p);
                 s->packet = p;
-                ret = USB_RET_ASYNC;
-            } else {
-                ret = p->result;
+                p->status = USB_RET_ASYNC;
             }
             break;
 
@@ -481,7 +490,7 @@ static int usb_msd_handle_data(USBDevice *dev, USBPacket *p)
             }
             /* Waiting for SCSI write to complete.  */
             s->packet = p;
-            ret = USB_RET_ASYNC;
+            p->status = USB_RET_ASYNC;
             break;
 
         case USB_MSDM_CSW:
@@ -493,11 +502,10 @@ static int usb_msd_handle_data(USBDevice *dev, USBPacket *p)
                 /* still in flight */
                 DPRINTF("Deferring packet %p [wait status]\n", p);
                 s->packet = p;
-                ret = USB_RET_ASYNC;
+                p->status = USB_RET_ASYNC;
             } else {
                 usb_msd_send_status(s, p);
                 s->mode = USB_MSDM_CBW;
-                ret = 13;
             }
             break;
 
@@ -508,7 +516,7 @@ static int usb_msd_handle_data(USBDevice *dev, USBPacket *p)
                 usb_msd_copy_data(s, p);
             }
             if (le32_to_cpu(s->csw.residue)) {
-                int len = p->iov.size - p->result;
+                int len = p->iov.size - p->actual_length;
                 if (len) {
                     usb_packet_skip(p, len);
                     s->data_len -= len;
@@ -517,12 +525,10 @@ static int usb_msd_handle_data(USBDevice *dev, USBPacket *p)
                     }
                 }
             }
-            if (p->result < p->iov.size) {
+            if (p->actual_length < p->iov.size) {
                 DPRINTF("Deferring packet %p [wait data-in]\n", p);
                 s->packet = p;
-                ret = USB_RET_ASYNC;
-            } else {
-                ret = p->result;
+                p->status = USB_RET_ASYNC;
             }
             break;
 
@@ -535,11 +541,9 @@ static int usb_msd_handle_data(USBDevice *dev, USBPacket *p)
     default:
         DPRINTF("Bad token\n");
     fail:
-        ret = USB_RET_STALL;
+        p->status = USB_RET_STALL;
         break;
     }
-
-    return ret;
 }
 
 static void usb_msd_password_cb(void *opaque, int err)
@@ -564,7 +568,7 @@ static void *usb_msd_load_request(QEMUFile *f, SCSIRequest *req)
     return NULL;
 }
 
-static const struct SCSIBusInfo usb_msd_scsi_info = {
+static const struct SCSIBusInfo usb_msd_scsi_info_storage = {
     .tcq = false,
     .max_target = 0,
     .max_lun = 0,
@@ -575,10 +579,22 @@ static const struct SCSIBusInfo usb_msd_scsi_info = {
     .load_request = usb_msd_load_request,
 };
 
-static int usb_msd_initfn(USBDevice *dev)
+static const struct SCSIBusInfo usb_msd_scsi_info_bot = {
+    .tcq = false,
+    .max_target = 0,
+    .max_lun = 15,
+
+    .transfer_data = usb_msd_transfer_data,
+    .complete = usb_msd_command_complete,
+    .cancel = usb_msd_request_cancelled,
+    .load_request = usb_msd_load_request,
+};
+
+static int usb_msd_initfn_storage(USBDevice *dev)
 {
     MSDState *s = DO_UPCAST(MSDState, dev, dev);
     BlockDriverState *bs = s->conf.bs;
+    SCSIDevice *scsi_dev;
 
     if (!bs) {
         error_report("drive property not set");
@@ -606,10 +622,10 @@ static int usb_msd_initfn(USBDevice *dev)
     }
 
     usb_desc_init(dev);
-    scsi_bus_new(&s->bus, &s->dev.qdev, &usb_msd_scsi_info);
-    s->scsi_dev = scsi_bus_legacy_add_drive(&s->bus, bs, 0, !!s->removable,
+    scsi_bus_new(&s->bus, &s->dev.qdev, &usb_msd_scsi_info_storage);
+    scsi_dev = scsi_bus_legacy_add_drive(&s->bus, bs, 0, !!s->removable,
                                             s->conf.bootindex);
-    if (!s->scsi_dev) {
+    if (!scsi_dev) {
         return -1;
     }
     s->bus.qbus.allow_hotplug = 0;
@@ -623,6 +639,19 @@ static int usb_msd_initfn(USBDevice *dev)
             autostart = 0;
         }
     }
+
+    return 0;
+}
+
+static int usb_msd_initfn_bot(USBDevice *dev)
+{
+    MSDState *s = DO_UPCAST(MSDState, dev, dev);
+
+    usb_desc_create_serial(dev);
+    usb_desc_init(dev);
+    scsi_bus_new(&s->bus, &s->dev.qdev, &usb_msd_scsi_info_bot);
+    s->bus.qbus.allow_hotplug = 0;
+    usb_msd_handle_reset(dev);
 
     return 0;
 }
@@ -709,12 +738,11 @@ static Property msd_properties[] = {
     DEFINE_PROP_END_OF_LIST(),
 };
 
-static void usb_msd_class_initfn(ObjectClass *klass, void *data)
+static void usb_msd_class_initfn_common(ObjectClass *klass)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
     USBDeviceClass *uc = USB_DEVICE_CLASS(klass);
 
-    uc->init           = usb_msd_initfn;
     uc->product_desc   = "QEMU USB MSD";
     uc->usb_desc       = &desc;
     uc->cancel_packet  = usb_msd_cancel_io;
@@ -724,19 +752,44 @@ static void usb_msd_class_initfn(ObjectClass *klass, void *data)
     uc->handle_data    = usb_msd_handle_data;
     dc->fw_name = "storage";
     dc->vmsd = &vmstate_usb_msd;
-    dc->props = msd_properties;
 }
 
-static TypeInfo msd_info = {
+static void usb_msd_class_initfn_storage(ObjectClass *klass, void *data)
+{
+    DeviceClass *dc = DEVICE_CLASS(klass);
+    USBDeviceClass *uc = USB_DEVICE_CLASS(klass);
+
+    uc->init = usb_msd_initfn_storage;
+    dc->props = msd_properties;
+    usb_msd_class_initfn_common(klass);
+}
+
+static void usb_msd_class_initfn_bot(ObjectClass *klass, void *data)
+{
+    USBDeviceClass *uc = USB_DEVICE_CLASS(klass);
+
+    uc->init = usb_msd_initfn_bot;
+    usb_msd_class_initfn_common(klass);
+}
+
+static const TypeInfo msd_info = {
     .name          = "usb-storage",
     .parent        = TYPE_USB_DEVICE,
     .instance_size = sizeof(MSDState),
-    .class_init    = usb_msd_class_initfn,
+    .class_init    = usb_msd_class_initfn_storage,
+};
+
+static const TypeInfo bot_info = {
+    .name          = "usb-bot",
+    .parent        = TYPE_USB_DEVICE,
+    .instance_size = sizeof(MSDState),
+    .class_init    = usb_msd_class_initfn_bot,
 };
 
 static void usb_msd_register_types(void)
 {
     type_register_static(&msd_info);
+    type_register_static(&bot_info);
     usb_legacy_register("usb-storage", "disk", usb_msd_init);
 }
 

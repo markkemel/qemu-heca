@@ -21,6 +21,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#ifndef TCG_TARGET_S390 
 #define TCG_TARGET_S390 1
 
 #define TCG_TARGET_WORDS_BIGENDIAN
@@ -88,8 +89,6 @@ typedef enum TCGReg {
 #define TCG_TARGET_HAS_movcond_i64      0
 #endif
 
-#define TCG_TARGET_HAS_GUEST_BASE
-
 /* used for function call generation */
 #define TCG_REG_CALL_STACK		TCG_REG_R15
 #define TCG_TARGET_STACK_ALIGN		8
@@ -105,3 +104,5 @@ static inline void flush_icache_range(tcg_target_ulong start,
                                       tcg_target_ulong stop)
 {
 }
+
+#endif

@@ -28,14 +28,14 @@
 #include <sys/stat.h>
 #include "hw/hw.h"
 #include "hw/pc.h"
-#include "qemu-error.h"
-#include "console.h"
+#include "qemu/error-report.h"
+#include "ui/console.h"
 #include "hw/loader.h"
-#include "monitor.h"
-#include "range.h"
-#include "sysemu.h"
-#include "hw/pci.h"
-#include "hw/msi.h"
+#include "monitor/monitor.h"
+#include "qemu/range.h"
+#include "sysemu/sysemu.h"
+#include "hw/pci/pci.h"
+#include "hw/pci/msi.h"
 #include "kvm_i386.h"
 
 #define MSIX_PAGE_SIZE 0x1000
@@ -46,6 +46,7 @@
 #define IORESOURCE_IRQ      0x00000400
 #define IORESOURCE_DMA      0x00000800
 #define IORESOURCE_PREFETCH 0x00002000  /* No side effects */
+#define IORESOURCE_MEM_64   0x00100000
 
 //#define DEVICE_ASSIGNMENT_DEBUG
 
@@ -133,7 +134,7 @@ typedef struct AssignedDevice {
     int msi_virq_nr;
     int *msi_virq;
     MSIXTableEntry *msix_table;
-    target_phys_addr_t msix_table_addr;
+    hwaddr msix_table_addr;
     uint16_t msix_max;
     MemoryRegion mmio;
     char *configfd_name;
@@ -147,7 +148,7 @@ static void assigned_dev_load_option_rom(AssignedDevice *dev);
 static void assigned_dev_unregister_msix_mmio(AssignedDevice *dev);
 
 static uint64_t assigned_dev_ioport_rw(AssignedDevRegion *dev_region,
-                                       target_phys_addr_t addr, int size,
+                                       hwaddr addr, int size,
                                        uint64_t *data)
 {
     uint64_t val = 0;
@@ -206,19 +207,19 @@ static uint64_t assigned_dev_ioport_rw(AssignedDevRegion *dev_region,
     return val;
 }
 
-static void assigned_dev_ioport_write(void *opaque, target_phys_addr_t addr,
+static void assigned_dev_ioport_write(void *opaque, hwaddr addr,
                                       uint64_t data, unsigned size)
 {
     assigned_dev_ioport_rw(opaque, addr, size, &data);
 }
 
 static uint64_t assigned_dev_ioport_read(void *opaque,
-                                         target_phys_addr_t addr, unsigned size)
+                                         hwaddr addr, unsigned size)
 {
     return assigned_dev_ioport_rw(opaque, addr, size, NULL);
 }
 
-static uint32_t slow_bar_readb(void *opaque, target_phys_addr_t addr)
+static uint32_t slow_bar_readb(void *opaque, hwaddr addr)
 {
     AssignedDevRegion *d = opaque;
     uint8_t *in = d->u.r_virtbase + addr;
@@ -230,7 +231,7 @@ static uint32_t slow_bar_readb(void *opaque, target_phys_addr_t addr)
     return r;
 }
 
-static uint32_t slow_bar_readw(void *opaque, target_phys_addr_t addr)
+static uint32_t slow_bar_readw(void *opaque, hwaddr addr)
 {
     AssignedDevRegion *d = opaque;
     uint16_t *in = (uint16_t *)(d->u.r_virtbase + addr);
@@ -242,7 +243,7 @@ static uint32_t slow_bar_readw(void *opaque, target_phys_addr_t addr)
     return r;
 }
 
-static uint32_t slow_bar_readl(void *opaque, target_phys_addr_t addr)
+static uint32_t slow_bar_readl(void *opaque, hwaddr addr)
 {
     AssignedDevRegion *d = opaque;
     uint32_t *in = (uint32_t *)(d->u.r_virtbase + addr);
@@ -254,7 +255,7 @@ static uint32_t slow_bar_readl(void *opaque, target_phys_addr_t addr)
     return r;
 }
 
-static void slow_bar_writeb(void *opaque, target_phys_addr_t addr, uint32_t val)
+static void slow_bar_writeb(void *opaque, hwaddr addr, uint32_t val)
 {
     AssignedDevRegion *d = opaque;
     uint8_t *out = d->u.r_virtbase + addr;
@@ -263,7 +264,7 @@ static void slow_bar_writeb(void *opaque, target_phys_addr_t addr, uint32_t val)
     *out = val;
 }
 
-static void slow_bar_writew(void *opaque, target_phys_addr_t addr, uint32_t val)
+static void slow_bar_writew(void *opaque, hwaddr addr, uint32_t val)
 {
     AssignedDevRegion *d = opaque;
     uint16_t *out = (uint16_t *)(d->u.r_virtbase + addr);
@@ -272,7 +273,7 @@ static void slow_bar_writew(void *opaque, target_phys_addr_t addr, uint32_t val)
     *out = val;
 }
 
-static void slow_bar_writel(void *opaque, target_phys_addr_t addr, uint32_t val)
+static void slow_bar_writel(void *opaque, hwaddr addr, uint32_t val)
 {
     AssignedDevRegion *d = opaque;
     uint32_t *out = (uint32_t *)(d->u.r_virtbase + addr);
@@ -442,9 +443,13 @@ static int assigned_dev_register_regions(PCIRegion *io_regions,
 
         /* handle memory io regions */
         if (cur_region->type & IORESOURCE_MEM) {
-            int t = cur_region->type & IORESOURCE_PREFETCH
-                ? PCI_BASE_ADDRESS_MEM_PREFETCH
-                : PCI_BASE_ADDRESS_SPACE_MEMORY;
+            int t = PCI_BASE_ADDRESS_SPACE_MEMORY;
+            if (cur_region->type & IORESOURCE_PREFETCH) {
+                t |= PCI_BASE_ADDRESS_MEM_PREFETCH;
+            }
+            if (cur_region->type & IORESOURCE_MEM_64) {
+                t |= PCI_BASE_ADDRESS_MEM_TYPE_64;
+            }
 
             /* map physical memory */
             pci_dev->v_addrs[i].u.r_virtbase = mmap(NULL, cur_region->size,
@@ -632,7 +637,8 @@ again:
         rp->valid = 0;
         rp->resource_fd = -1;
         size = end - start + 1;
-        flags &= IORESOURCE_IO | IORESOURCE_MEM | IORESOURCE_PREFETCH;
+        flags &= IORESOURCE_IO | IORESOURCE_MEM | IORESOURCE_PREFETCH
+                 | IORESOURCE_MEM_64;
         if (size == 0 || (flags & ~IORESOURCE_PREFETCH) == 0) {
             continue;
         }
@@ -882,8 +888,7 @@ static int assign_intx(AssignedDevice *dev)
     intx_route = pci_device_route_intx_to_irq(&dev->dev, dev->intpin);
     assert(intx_route.mode != PCI_INTX_INVERTED);
 
-    if (dev->intx_route.mode == intx_route.mode &&
-        dev->intx_route.irq == intx_route.irq) {
+    if (!pci_intx_route_changed(&dev->intx_route, &intx_route)) {
         return 0;
     }
 
@@ -931,8 +936,8 @@ retry:
             /* Retry with host-side MSI. There might be an IRQ conflict and
              * either the kernel or the device doesn't support sharing. */
             error_report("Host-side INTx sharing not supported, "
-                         "using MSI instead.\n"
-                         "Some devices do not to work properly in this mode.");
+                         "using MSI instead");
+            error_printf("Some devices do not work properly in this mode.\n");
             dev->features |= ASSIGNED_DEVICE_PREFER_MSI_MASK;
             goto retry;
         }
@@ -997,12 +1002,9 @@ static void assigned_dev_update_msi(PCIDevice *pci_dev)
     }
 
     if (ctrl_byte & PCI_MSI_FLAGS_ENABLE) {
-        uint8_t *pos = pci_dev->config + pci_dev->msi_cap;
-        MSIMessage msg;
+        MSIMessage msg = msi_get_message(pci_dev, 0);
         int virq;
 
-        msg.address = pci_get_long(pos + PCI_MSI_ADDRESS_LO);
-        msg.data = pci_get_word(pos + PCI_MSI_DATA_32);
         virq = kvm_irqchip_add_msi_route(kvm_state, msg);
         if (virq < 0) {
             perror("assigned_dev_update_msi: kvm_irqchip_add_msi_route");
@@ -1029,6 +1031,19 @@ static bool assigned_dev_msix_masked(MSIXTableEntry *entry)
     return (entry->ctrl & cpu_to_le32(0x1)) != 0;
 }
 
+/*
+ * When MSI-X is first enabled the vector table typically has all the
+ * vectors masked, so we can't use that as the obvious test to figure out
+ * how many vectors to initially enable.  Instead we look at the data field
+ * because this is what worked for pci-assign for a long time.  This makes
+ * sure the physical MSI-X state tracks the guest's view, which is important
+ * for some VF/PF and PF/fw communication channels.
+ */
+static bool assigned_dev_msix_skipped(MSIXTableEntry *entry)
+{
+    return !entry->data;
+}
+
 static int assigned_dev_update_msix_mmio(PCIDevice *pci_dev)
 {
     AssignedDevice *adev = DO_UPCAST(AssignedDevice, dev, pci_dev);
@@ -1039,7 +1054,7 @@ static int assigned_dev_update_msix_mmio(PCIDevice *pci_dev)
 
     /* Get the usable entry number for allocating */
     for (i = 0; i < adev->msix_max; i++, entry++) {
-        if (assigned_dev_msix_masked(entry)) {
+        if (assigned_dev_msix_skipped(entry)) {
             continue;
         }
         entries_nr++;
@@ -1068,7 +1083,7 @@ static int assigned_dev_update_msix_mmio(PCIDevice *pci_dev)
     for (i = 0; i < adev->msix_max; i++, entry++) {
         adev->msi_virq[i] = -1;
 
-        if (assigned_dev_msix_masked(entry)) {
+        if (assigned_dev_msix_skipped(entry)) {
             continue;
         }
 
@@ -1499,7 +1514,7 @@ static int assigned_device_pci_cap_init(PCIDevice *pci_dev)
 }
 
 static uint64_t
-assigned_dev_msix_mmio_read(void *opaque, target_phys_addr_t addr,
+assigned_dev_msix_mmio_read(void *opaque, hwaddr addr,
                             unsigned size)
 {
     AssignedDevice *adev = opaque;
@@ -1510,7 +1525,7 @@ assigned_dev_msix_mmio_read(void *opaque, target_phys_addr_t addr,
     return val;
 }
 
-static void assigned_dev_msix_mmio_write(void *opaque, target_phys_addr_t addr,
+static void assigned_dev_msix_mmio_write(void *opaque, hwaddr addr,
                                          uint64_t val, unsigned size)
 {
     AssignedDevice *adev = opaque;
@@ -1888,10 +1903,10 @@ static void assigned_dev_load_option_rom(AssignedDevice *dev)
     memset(ptr, 0xff, st.st_size);
 
     if (!fread(ptr, 1, st.st_size, fp)) {
-        error_report("pci-assign: Cannot read from host %s\n"
-                     "\tDevice option ROM contents are probably invalid "
-                     "(check dmesg).\n\tSkip option ROM probe with rombar=0, "
-                     "or load from file with romfile=", rom_file);
+        error_report("pci-assign: Cannot read from host %s", rom_file);
+        error_printf("Device option ROM contents are probably invalid "
+                     "(check dmesg).\nSkip option ROM probe with rombar=0, "
+                     "or load from file with romfile=\n");
         memory_region_destroy(&dev->dev.rom);
         goto close_rom;
     }

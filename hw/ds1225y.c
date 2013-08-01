@@ -34,7 +34,7 @@ typedef struct {
     uint8_t *contents;
 } NvRamState;
 
-static uint64_t nvram_read(void *opaque, target_phys_addr_t addr, unsigned size)
+static uint64_t nvram_read(void *opaque, hwaddr addr, unsigned size)
 {
     NvRamState *s = opaque;
     uint32_t val;
@@ -44,7 +44,7 @@ static uint64_t nvram_read(void *opaque, target_phys_addr_t addr, unsigned size)
     return val;
 }
 
-static void nvram_write(void *opaque, target_phys_addr_t addr, uint64_t val,
+static void nvram_write(void *opaque, hwaddr addr, uint64_t val,
                         unsigned size)
 {
     NvRamState *s = opaque;
@@ -150,7 +150,7 @@ static void nvram_sysbus_class_init(ObjectClass *klass, void *data)
     dc->props = nvram_sysbus_properties;
 }
 
-static TypeInfo nvram_sysbus_info = {
+static const TypeInfo nvram_sysbus_info = {
     .name          = "ds1225y",
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(SysBusNvRamState),

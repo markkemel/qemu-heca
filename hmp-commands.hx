@@ -109,7 +109,22 @@ ETEXI
 STEXI
 @item block_job_cancel
 @findex block_job_cancel
-Stop an active block streaming operation.
+Stop an active background block operation (streaming, mirroring).
+ETEXI
+
+    {
+        .name       = "block_job_complete",
+        .args_type  = "device:B",
+        .params     = "device",
+        .help       = "stop an active background block operation",
+        .mhandler.cmd = hmp_block_job_complete,
+    },
+
+STEXI
+@item block_job_complete
+@findex block_job_complete
+Manually trigger completion of an active background block operation.
+For mirroring, this will switch the device to the destination path.
 ETEXI
 
     {
@@ -822,6 +837,44 @@ STEXI
 @item nmi @var{cpu}
 @findex nmi
 Inject an NMI on the given CPU (x86 only).
+
+ETEXI
+
+    {
+        .name       = "ringbuf_write",
+        .args_type  = "device:s,data:s",
+        .params     = "device data",
+        .help       = "Write to a ring buffer character device",
+        .mhandler.cmd = hmp_ringbuf_write,
+    },
+
+STEXI
+@item ringbuf_write @var{device} @var{data}
+@findex ringbuf_write
+Write @var{data} to ring buffer character device @var{device}.
+@var{data} must be a UTF-8 string.
+
+ETEXI
+
+    {
+        .name       = "ringbuf_read",
+        .args_type  = "device:s,size:i",
+        .params     = "device size",
+        .help       = "Read from a ring buffer character device",
+        .mhandler.cmd = hmp_ringbuf_read,
+    },
+
+STEXI
+@item ringbuf_read @var{device}
+@findex ringbuf_read
+Read and print up to @var{size} bytes from ring buffer character
+device @var{device}.
+Certain non-printable characters are printed \uXXXX, where XXXX is the
+character code in hexadecimal.  Character \ is printed \\.
+Bug: can screw up when the buffer contains invalid UTF-8 sequences,
+NUL characters, after the ring buffer lost data, and when reading
+stops because the size limit is reached.
+
 ETEXI
 
     {
@@ -986,6 +1039,27 @@ STEXI
 @item snapshot_blkdev
 @findex snapshot_blkdev
 Snapshot device, using snapshot file as target if provided
+ETEXI
+
+    {
+        .name       = "drive_mirror",
+        .args_type  = "reuse:-n,full:-f,device:B,target:s,format:s?",
+        .params     = "[-n] [-f] device target [format]",
+        .help       = "initiates live storage\n\t\t\t"
+                      "migration for a device. The device's contents are\n\t\t\t"
+                      "copied to the new image file, including data that\n\t\t\t"
+                      "is written after the command is started.\n\t\t\t"
+                      "The -n flag requests QEMU to reuse the image found\n\t\t\t"
+                      "in new-image-file, instead of recreating it from scratch.\n\t\t\t"
+                      "The -f flag requests QEMU to copy the whole disk,\n\t\t\t"
+                      "so that the result does not need a backing file.\n\t\t\t",
+        .mhandler.cmd = hmp_drive_mirror,
+    },
+STEXI
+@item drive_mirror
+@findex drive_mirror
+Start mirroring a block device's writes to a new destination,
+using the specified target.
 ETEXI
 
     {
@@ -1274,6 +1348,51 @@ Remove all matches from the access control list, and set the default
 policy back to @code{deny}.
 ETEXI
 
+    {
+        .name       = "nbd_server_start",
+        .args_type  = "all:-a,writable:-w,uri:s",
+        .params     = "nbd_server_start [-a] [-w] host:port",
+        .help       = "serve block devices on the given host and port",
+        .mhandler.cmd = hmp_nbd_server_start,
+    },
+STEXI
+@item nbd_server_start @var{host}:@var{port}
+@findex nbd_server_start
+Start an NBD server on the given host and/or port.  If the @option{-a}
+option is included, all of the virtual machine's block devices that
+have an inserted media on them are automatically exported; in this case,
+the @option{-w} option makes the devices writable too.
+ETEXI
+
+    {
+        .name       = "nbd_server_add",
+        .args_type  = "writable:-w,device:B",
+        .params     = "nbd_server_add [-w] device",
+        .help       = "export a block device via NBD",
+        .mhandler.cmd = hmp_nbd_server_add,
+    },
+STEXI
+@item nbd_server_add @var{device}
+@findex nbd_server_add
+Export a block device through QEMU's NBD server, which must be started
+beforehand with @command{nbd_server_start}.  The @option{-w} option makes the
+exported device writable too.
+ETEXI
+
+    {
+        .name       = "nbd_server_stop",
+        .args_type  = "",
+        .params     = "nbd_server_stop",
+        .help       = "stop serving block devices using the NBD protocol",
+        .mhandler.cmd = hmp_nbd_server_stop,
+    },
+STEXI
+@item nbd_server_stop
+@findex nbd_server_stop
+Stop the QEMU embedded NBD server.
+ETEXI
+
+
 #if defined(TARGET_I386)
 
     {
@@ -1352,19 +1471,6 @@ Set the encrypted device @var{device} password to @var{password}
 ETEXI
 
     {
-        .name       = "cpu_set",
-        .args_type  = "cpu:i,state:s",
-        .params     = "cpu [online|offline]",
-        .help       = "change cpu state",
-        .mhandler.cmd  = do_cpu_set_nr,
-    },
-
-STEXI
-@item cpu_set @var{cpu} [online|offline]
-Set CPU @var{cpu} online or offline.
-ETEXI
-
-    {
         .name       = "set_password",
         .args_type  = "protocol:s,password:s,connected:s?",
         .params     = "protocol password action-if-connected",
@@ -1416,12 +1522,46 @@ passed since 1970, i.e. unix epoch.
 @end table
 ETEXI
 
+HXCOMM Disabled for now, because it isn't built on top of QMP's chardev-add
+HXCOMM     {
+HXCOMM         .name       = "chardev-add",
+HXCOMM         .args_type  = "args:s",
+HXCOMM         .params     = "args",
+HXCOMM         .help       = "add chardev",
+HXCOMM         .mhandler.cmd = hmp_chardev_add,
+HXCOMM     },
+HXCOMM
+HXCOMM STEXI
+HXCOMM @item chardev_add args
+HXCOMM @findex chardev_add
+HXCOMM
+HXCOMM chardev_add accepts the same parameters as the -chardev command line switch.
+HXCOMM
+HXCOMM ETEXI
+HXCOMM
+HXCOMM     {
+HXCOMM         .name       = "chardev-remove",
+HXCOMM         .args_type  = "id:s",
+HXCOMM         .params     = "id",
+HXCOMM         .help       = "remove chardev",
+HXCOMM         .mhandler.cmd = hmp_chardev_remove,
+HXCOMM     },
+HXCOMM
+HXCOMM STEXI
+HXCOMM @item chardev_remove id
+HXCOMM @findex chardev_remove
+HXCOMM
+HXCOMM Removes the chardev @var{id}.
+HXCOMM
+HXCOMM ETEXI
+
     {
         .name       = "info",
         .args_type  = "item:s?",
         .params     = "[subcommand]",
         .help       = "show various information about the system state",
-        .mhandler.cmd = do_info,
+        .mhandler.cmd = do_info_help,
+        .sub_table = info_cmds,
     },
 
 STEXI
@@ -1505,13 +1645,6 @@ show roms
 @end table
 ETEXI
 
-#ifdef CONFIG_TRACE_SIMPLE
-STEXI
-@item info trace
-show contents of trace buffer
-ETEXI
-#endif
-
 STEXI
 @item info trace-events
 show available trace events and their state
@@ -1520,3 +1653,42 @@ ETEXI
 STEXI
 @end table
 ETEXI
+
+    {
+        .name       = "heca_migrate_dest_init",
+        .args_type  = "dest_ip:s,source_ip:s",
+        .params     = "dest_ip source_ip",
+        .help       = "Initialize Heca Destination Node for a live migration",
+        .mhandler.cmd = hmp_heca_migrate_dest_init,
+    },
+
+STEXI
+@item heca_migrate_dest_init
+@findex heca_migrate_dest_init
+Initialize the heca destination node for a live migration.
+ETEXI
+
+
+     {
+        .name       = "heca_migrate",
+        .args_type  = "detach:-d,blk:-b,inc:-i,uri:s,precopy_time:i?",
+        .params     = "[-d] [-b] [-i] uri [precopy_time]",
+        .help       = "migrate to URI (using -d to not wait for completion)"
+		              "\n\t\t\t -b for migration without shared storage with"
+		              " full copy of disk\n\t\t\t -i for migration without"
+		              " shared storage with incremental copy of disk"
+		              " (base image shared between src and destination)"
+                      "\n\t\t\t precopy_time is an optional time specified in ms",
+        .mhandler.cmd = hmp_heca_migrate,
+    },
+
+STEXI
+@item heca_migrate [-d] [-b] [-i] [-t] @var{uri} @var{init_string}
+@findex heca_migrate
+Migrate to @var{uri} (using -d to not wait for completion).
+	-b for migration with full copy of disk
+	-i for migration with incremental copy of disk (base image is shared)
+    -t for hybrid pre-copy phase specified in ms.
+ETEXI
+
+
