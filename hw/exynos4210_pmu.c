@@ -392,7 +392,7 @@ typedef struct Exynos4210PmuState {
     uint32_t reg[PMU_NUM_OF_REGISTERS];
 } Exynos4210PmuState;
 
-static uint64_t exynos4210_pmu_read(void *opaque, target_phys_addr_t offset,
+static uint64_t exynos4210_pmu_read(void *opaque, hwaddr offset,
                                     unsigned size)
 {
     Exynos4210PmuState *s = (Exynos4210PmuState *)opaque;
@@ -411,7 +411,7 @@ static uint64_t exynos4210_pmu_read(void *opaque, target_phys_addr_t offset,
     return 0;
 }
 
-static void exynos4210_pmu_write(void *opaque, target_phys_addr_t offset,
+static void exynos4210_pmu_write(void *opaque, hwaddr offset,
                                  uint64_t val, unsigned size)
 {
     Exynos4210PmuState *s = (Exynos4210PmuState *)opaque;
@@ -484,7 +484,7 @@ static void exynos4210_pmu_class_init(ObjectClass *klass, void *data)
     dc->vmsd = &exynos4210_pmu_vmstate;
 }
 
-static TypeInfo exynos4210_pmu_info = {
+static const TypeInfo exynos4210_pmu_info = {
     .name          = "exynos4210.pmu",
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(Exynos4210PmuState),

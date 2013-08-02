@@ -21,7 +21,7 @@
 //#define SH4_SINGLE_STEP
 
 #include "cpu.h"
-#include "disas.h"
+#include "disas/disas.h"
 #include "tcg-op.h"
 
 #include "helper.h"
@@ -69,7 +69,7 @@ static TCGv cpu_flags, cpu_delayed_pc;
 
 static uint32_t gen_opc_hflags[OPC_BUF_SIZE];
 
-#include "gen-icount.h"
+#include "exec/gen-icount.h"
 
 static void sh4_translate_init(void)
 {
@@ -1967,7 +1967,7 @@ gen_intermediate_code_internal(CPUSH4State * env, TranslationBlock * tb,
     int max_insns;
 
     pc_start = tb->pc;
-    gen_opc_end = gen_opc_buf + OPC_MAX_SIZE;
+    gen_opc_end = tcg_ctx.gen_opc_buf + OPC_MAX_SIZE;
     ctx.pc = pc_start;
     ctx.flags = (uint32_t)tb->flags;
     ctx.bstate = BS_NONE;
@@ -1986,7 +1986,7 @@ gen_intermediate_code_internal(CPUSH4State * env, TranslationBlock * tb,
     if (max_insns == 0)
         max_insns = CF_COUNT_MASK;
     gen_icount_start();
-    while (ctx.bstate == BS_NONE && gen_opc_ptr < gen_opc_end) {
+    while (ctx.bstate == BS_NONE && tcg_ctx.gen_opc_ptr < gen_opc_end) {
         if (unlikely(!QTAILQ_EMPTY(&env->breakpoints))) {
             QTAILQ_FOREACH(bp, &env->breakpoints, entry) {
                 if (ctx.pc == bp->pc) {
@@ -1999,16 +1999,16 @@ gen_intermediate_code_internal(CPUSH4State * env, TranslationBlock * tb,
 	    }
 	}
         if (search_pc) {
-            i = gen_opc_ptr - gen_opc_buf;
+            i = tcg_ctx.gen_opc_ptr - tcg_ctx.gen_opc_buf;
             if (ii < i) {
                 ii++;
                 while (ii < i)
-                    gen_opc_instr_start[ii++] = 0;
+                    tcg_ctx.gen_opc_instr_start[ii++] = 0;
             }
-            gen_opc_pc[ii] = ctx.pc;
+            tcg_ctx.gen_opc_pc[ii] = ctx.pc;
             gen_opc_hflags[ii] = ctx.flags;
-            gen_opc_instr_start[ii] = 1;
-            gen_opc_icount[ii] = num_insns;
+            tcg_ctx.gen_opc_instr_start[ii] = 1;
+            tcg_ctx.gen_opc_icount[ii] = num_insns;
         }
         if (num_insns + 1 == max_insns && (tb->cflags & CF_LAST_IO))
             gen_io_start();
@@ -2056,12 +2056,12 @@ gen_intermediate_code_internal(CPUSH4State * env, TranslationBlock * tb,
     }
 
     gen_icount_end(tb, num_insns);
-    *gen_opc_ptr = INDEX_op_end;
+    *tcg_ctx.gen_opc_ptr = INDEX_op_end;
     if (search_pc) {
-        i = gen_opc_ptr - gen_opc_buf;
+        i = tcg_ctx.gen_opc_ptr - tcg_ctx.gen_opc_buf;
         ii++;
         while (ii <= i)
-            gen_opc_instr_start[ii++] = 0;
+            tcg_ctx.gen_opc_instr_start[ii++] = 0;
     } else {
         tb->size = ctx.pc - pc_start;
         tb->icount = num_insns;
@@ -2070,7 +2070,7 @@ gen_intermediate_code_internal(CPUSH4State * env, TranslationBlock * tb,
 #ifdef DEBUG_DISAS
     if (qemu_loglevel_mask(CPU_LOG_TB_IN_ASM)) {
 	qemu_log("IN:\n");	/* , lookup_symbol(pc_start)); */
-	log_target_disas(pc_start, ctx.pc - pc_start, 0);
+        log_target_disas(env, pc_start, ctx.pc - pc_start, 0);
 	qemu_log("\n");
     }
 #endif
@@ -2088,6 +2088,6 @@ void gen_intermediate_code_pc(CPUSH4State * env, struct TranslationBlock *tb)
 
 void restore_state_to_opc(CPUSH4State *env, TranslationBlock *tb, int pc_pos)
 {
-    env->pc = gen_opc_pc[pc_pos];
+    env->pc = tcg_ctx.gen_opc_pc[pc_pos];
     env->flags = gen_opc_hflags[pc_pos];
 }

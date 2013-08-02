@@ -53,7 +53,7 @@
  */
 
 #include "sysbus.h"
-#include "qemu-timer.h"
+#include "qemu/timer.h"
 #include "qemu-common.h"
 #include "ptimer.h"
 
@@ -568,7 +568,7 @@ static void exynos4210_gfrc_event(void *opaque)
     /* Reload FRC to reach nearest comparator */
     s->g_timer.curr_comp = exynos4210_gcomp_find(s);
     distance = exynos4210_gcomp_get_distance(s, s->g_timer.curr_comp);
-    if (distance > MCT_GT_COUNTER_STEP) {
+    if (distance > MCT_GT_COUNTER_STEP || !distance) {
         distance = MCT_GT_COUNTER_STEP;
     }
     exynos4210_gfrc_set_count(&s->g_timer, distance);
@@ -985,7 +985,7 @@ static void exynos4210_mct_reset(DeviceState *d)
 }
 
 /* Multi Core Timer read */
-static uint64_t exynos4210_mct_read(void *opaque, target_phys_addr_t offset,
+static uint64_t exynos4210_mct_read(void *opaque, hwaddr offset,
         unsigned size)
 {
     Exynos4210MCTState *s = (Exynos4210MCTState *)opaque;
@@ -1098,7 +1098,7 @@ static uint64_t exynos4210_mct_read(void *opaque, target_phys_addr_t offset,
 }
 
 /* MCT write */
-static void exynos4210_mct_write(void *opaque, target_phys_addr_t offset,
+static void exynos4210_mct_write(void *opaque, hwaddr offset,
         uint64_t value, unsigned size)
 {
     Exynos4210MCTState *s = (Exynos4210MCTState *)opaque;
@@ -1467,7 +1467,7 @@ static void exynos4210_mct_class_init(ObjectClass *klass, void *data)
     dc->vmsd = &vmstate_exynos4210_mct_state;
 }
 
-static TypeInfo exynos4210_mct_info = {
+static const TypeInfo exynos4210_mct_info = {
     .name          = "exynos4210.mct",
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(Exynos4210MCTState),

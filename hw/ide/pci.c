@@ -24,10 +24,10 @@
  */
 #include <hw/hw.h>
 #include <hw/pc.h>
-#include <hw/pci.h>
+#include <hw/pci/pci.h>
 #include <hw/isa.h>
-#include "block.h"
-#include "dma.h"
+#include "block/block.h"
+#include "sysemu/dma.h"
 
 #include <hw/ide/pci.h>
 
@@ -311,7 +311,6 @@ void bmdma_cmd_writeb(BMDMAState *bm, uint32_t val)
             if (bm->bus->dma->aiocb) {
                 bdrv_drain_all();
                 assert(bm->bus->dma->aiocb == NULL);
-                assert((bm->status & BM_STATUS_DMAING) == 0);
             }
         } else {
             bm->cur_addr = bm->addr;
@@ -327,7 +326,7 @@ void bmdma_cmd_writeb(BMDMAState *bm, uint32_t val)
     bm->cmd = val & 0x09;
 }
 
-static uint64_t bmdma_addr_read(void *opaque, target_phys_addr_t addr,
+static uint64_t bmdma_addr_read(void *opaque, hwaddr addr,
                                 unsigned width)
 {
     BMDMAState *bm = opaque;
@@ -341,7 +340,7 @@ static uint64_t bmdma_addr_read(void *opaque, target_phys_addr_t addr,
     return data;
 }
 
-static void bmdma_addr_write(void *opaque, target_phys_addr_t addr,
+static void bmdma_addr_write(void *opaque, hwaddr addr,
                              uint64_t data, unsigned width)
 {
     BMDMAState *bm = opaque;

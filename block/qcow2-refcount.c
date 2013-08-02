@@ -23,7 +23,7 @@
  */
 
 #include "qemu-common.h"
-#include "block_int.h"
+#include "block/block_int.h"
 #include "block/qcow2.h"
 
 static int64_t alloc_clusters_noref(BlockDriverState *bs, int64_t size);
@@ -301,7 +301,8 @@ static int alloc_refcount_block(BlockDriverState *bs,
     uint64_t last_table_size;
     uint64_t blocks_clusters;
     do {
-        uint64_t table_clusters = size_to_clusters(s, table_size);
+        uint64_t table_clusters =
+            size_to_clusters(s, table_size * sizeof(uint64_t));
         blocks_clusters = 1 +
             ((table_clusters + refcount_block_clusters - 1)
             / refcount_block_clusters);
@@ -736,11 +737,7 @@ int qcow2_update_snapshot_refcount(BlockDriverState *bs,
      * l1_table_offset when it is the current s->l1_table_offset! Be careful
      * when changing this! */
     if (l1_table_offset != s->l1_table_offset) {
-        if (l1_size2 != 0) {
-            l1_table = g_malloc0(align_offset(l1_size2, 512));
-        } else {
-            l1_table = NULL;
-        }
+        l1_table = g_malloc0(align_offset(l1_size2, 512));
         l1_allocated = 1;
         if (bdrv_pread(bs->file, l1_table_offset,
                        l1_table, l1_size2) != l1_size2)

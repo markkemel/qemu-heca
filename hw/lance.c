@@ -36,9 +36,9 @@
  */
 
 #include "sysbus.h"
-#include "net.h"
-#include "qemu-timer.h"
-#include "qemu_socket.h"
+#include "net/net.h"
+#include "qemu/timer.h"
+#include "qemu/sockets.h"
 #include "sun4m.h"
 #include "pcnet.h"
 #include "trace.h"
@@ -55,7 +55,7 @@ static void parent_lance_reset(void *opaque, int irq, int level)
         pcnet_h_reset(&d->state);
 }
 
-static void lance_mem_write(void *opaque, target_phys_addr_t addr,
+static void lance_mem_write(void *opaque, hwaddr addr,
                             uint64_t val, unsigned size)
 {
     SysBusPCNetState *d = opaque;
@@ -64,7 +64,7 @@ static void lance_mem_write(void *opaque, target_phys_addr_t addr,
     pcnet_ioport_writew(&d->state, addr, val & 0xffff);
 }
 
-static uint64_t lance_mem_read(void *opaque, target_phys_addr_t addr,
+static uint64_t lance_mem_read(void *opaque, hwaddr addr,
                                unsigned size)
 {
     SysBusPCNetState *d = opaque;
@@ -87,7 +87,7 @@ static const MemoryRegionOps lance_mem_ops = {
 
 static void lance_cleanup(NetClientState *nc)
 {
-    PCNetState *d = DO_UPCAST(NICState, nc, nc)->opaque;
+    PCNetState *d = qemu_get_nic_opaque(nc);
 
     pcnet_common_cleanup(d);
 }
@@ -155,7 +155,7 @@ static void lance_class_init(ObjectClass *klass, void *data)
     dc->props = lance_properties;
 }
 
-static TypeInfo lance_info = {
+static const TypeInfo lance_info = {
     .name          = "lance",
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(SysBusPCNetState),

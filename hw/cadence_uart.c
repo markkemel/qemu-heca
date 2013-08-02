@@ -17,8 +17,8 @@
  */
 
 #include "sysbus.h"
-#include "qemu-char.h"
-#include "qemu-timer.h"
+#include "char/char.h"
+#include "qemu/timer.h"
 
 #ifdef CADENCE_UART_ERR_DEBUG
 #define DB_PRINT(...) do { \
@@ -343,6 +343,7 @@ static void uart_read_rx_fifo(UartState *s, uint32_t *c)
         if (!s->rx_count) {
             s->r[R_SR] |= UART_SR_INTR_REMPTY;
         }
+        qemu_chr_accept_input(s->chr);
     } else {
         *c = 0;
         s->r[R_SR] |= UART_SR_INTR_REMPTY;
@@ -354,12 +355,12 @@ static void uart_read_rx_fifo(UartState *s, uint32_t *c)
     uart_update_status(s);
 }
 
-static void uart_write(void *opaque, target_phys_addr_t offset,
+static void uart_write(void *opaque, hwaddr offset,
                           uint64_t value, unsigned size)
 {
     UartState *s = (UartState *)opaque;
 
-    DB_PRINT(" offset:%x data:%08x\n", offset, (unsigned)value);
+    DB_PRINT(" offset:%x data:%08x\n", (unsigned)offset, (unsigned)value);
     offset >>= 2;
     switch (offset) {
     case R_IER: /* ier (wts imr) */
@@ -397,7 +398,7 @@ static void uart_write(void *opaque, target_phys_addr_t offset,
     }
 }
 
-static uint64_t uart_read(void *opaque, target_phys_addr_t offset,
+static uint64_t uart_read(void *opaque, hwaddr offset,
         unsigned size)
 {
     UartState *s = (UartState *)opaque;
@@ -405,12 +406,15 @@ static uint64_t uart_read(void *opaque, target_phys_addr_t offset,
 
     offset >>= 2;
     if (offset >= R_MAX) {
-        return 0;
+        c = 0;
     } else if (offset == R_TX_RX) {
         uart_read_rx_fifo(s, &c);
-        return c;
+    } else {
+       c = s->r[offset];
     }
-    return s->r[offset];
+
+    DB_PRINT(" offset:%x data:%08x\n", (unsigned)(offset << 2), (unsigned)c);
+    return c;
 }
 
 static const MemoryRegionOps uart_ops = {
@@ -498,7 +502,7 @@ static void cadence_uart_class_init(ObjectClass *klass, void *data)
     dc->vmsd = &vmstate_cadence_uart;
 }
 
-static TypeInfo cadence_uart_info = {
+static const TypeInfo cadence_uart_info = {
     .name          = "cadence_uart",
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(UartState),

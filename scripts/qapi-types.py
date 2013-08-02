@@ -248,7 +248,7 @@ fdef.write(mcgen('''
  *
  */
 
-#include "qapi/qapi-dealloc-visitor.h"
+#include "qapi/dealloc-visitor.h"
 #include "%(prefix)sqapi-types.h"
 #include "%(prefix)sqapi-visit.h"
 
@@ -273,7 +273,8 @@ fdecl.write(mcgen('''
 #ifndef %(guard)s
 #define %(guard)s
 
-#include "qemu-common.h"
+#include <stdbool.h>
+#include <stdint.h>
 
 ''',
                   guard=guardname(h_file)))

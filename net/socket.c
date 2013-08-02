@@ -21,18 +21,16 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-#include "net/socket.h"
-
 #include "config-host.h"
 
-#include "net.h"
-#include "monitor.h"
-#include "qemu-char.h"
+#include "net/net.h"
+#include "clients.h"
+#include "monitor/monitor.h"
 #include "qemu-common.h"
-#include "qemu-error.h"
-#include "qemu-option.h"
-#include "qemu_socket.h"
-#include "iov.h"
+#include "qemu/error-report.h"
+#include "qemu/option.h"
+#include "qemu/sockets.h"
+#include "qemu/iov.h"
 
 typedef struct NetSocketState {
     NetClientState nc;
@@ -748,7 +746,7 @@ int net_init_socket(const NetClientOptions *opts, const char *name,
         error_report("localaddr= is mandatory with udp=");
         return -1;
     }
-    if (net_socket_udp_init(peer, "udp", name, sock->udp, sock->localaddr) ==
+    if (net_socket_udp_init(peer, "socket", name, sock->udp, sock->localaddr) ==
         -1) {
         return -1;
     }

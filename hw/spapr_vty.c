@@ -1,5 +1,5 @@
 #include "qdev.h"
-#include "qemu-char.h"
+#include "char/char.h"
 #include "hw/spapr.h"
 #include "hw/spapr_vio.h"
 
@@ -70,7 +70,7 @@ static int spapr_vty_init(VIOsPAPRDevice *sdev)
 }
 
 /* Forward declaration */
-static target_ulong h_put_term_char(CPUPPCState *env, sPAPREnvironment *spapr,
+static target_ulong h_put_term_char(PowerPCCPU *cpu, sPAPREnvironment *spapr,
                                     target_ulong opcode, target_ulong *args)
 {
     target_ulong reg = args[0];
@@ -97,7 +97,7 @@ static target_ulong h_put_term_char(CPUPPCState *env, sPAPREnvironment *spapr,
     return H_SUCCESS;
 }
 
-static target_ulong h_get_term_char(CPUPPCState *env, sPAPREnvironment *spapr,
+static target_ulong h_get_term_char(PowerPCCPU *cpu, sPAPREnvironment *spapr,
                                     target_ulong opcode, target_ulong *args)
 {
     target_ulong reg = args[0];
@@ -150,7 +150,7 @@ static void spapr_vty_class_init(ObjectClass *klass, void *data)
     dc->props = spapr_vty_properties;
 }
 
-static TypeInfo spapr_vty_info = {
+static const TypeInfo spapr_vty_info = {
     .name          = "spapr-vty",
     .parent        = TYPE_VIO_SPAPR_DEVICE,
     .instance_size = sizeof(VIOsPAPRVTYDevice),

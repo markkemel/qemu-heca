@@ -19,9 +19,9 @@
  */
 
 #include "cpu.h"
-#include "disas.h"
+#include "disas/disas.h"
 #include "tcg-op.h"
-#include "host-utils.h"
+#include "qemu/host-utils.h"
 
 #include "helper.h"
 #define GEN_HELPER 1
@@ -68,10 +68,10 @@ static TCGv cpu_cfar;
 #endif
 static TCGv cpu_xer;
 static TCGv cpu_reserve;
-static TCGv_i32 cpu_fpscr;
+static TCGv cpu_fpscr;
 static TCGv_i32 cpu_access_type;
 
-#include "gen-icount.h"
+#include "exec/gen-icount.h"
 
 void ppc_translate_init(void)
 {
@@ -163,8 +163,8 @@ void ppc_translate_init(void)
                                      offsetof(CPUPPCState, reserve_addr),
                                      "reserve_addr");
 
-    cpu_fpscr = tcg_global_mem_new_i32(TCG_AREG0,
-                                       offsetof(CPUPPCState, fpscr), "fpscr");
+    cpu_fpscr = tcg_global_mem_new(TCG_AREG0,
+                                   offsetof(CPUPPCState, fpscr), "fpscr");
 
     cpu_access_type = tcg_global_mem_new_i32(TCG_AREG0,
                                              offsetof(CPUPPCState, access_type), "access_type");
@@ -2302,6 +2302,7 @@ GEN_FLOAT_B(neg, 0x08, 0x01, 0, PPC_FLOAT);
 /* mcrfs */
 static void gen_mcrfs(DisasContext *ctx)
 {
+    TCGv tmp = tcg_temp_new();
     int bfa;
 
     if (unlikely(!ctx->fpu_enabled)) {
@@ -2309,9 +2310,11 @@ static void gen_mcrfs(DisasContext *ctx)
         return;
     }
     bfa = 4 * (7 - crfS(ctx->opcode));
-    tcg_gen_shri_i32(cpu_crf[crfD(ctx->opcode)], cpu_fpscr, bfa);
+    tcg_gen_shri_tl(tmp, cpu_fpscr, bfa);
+    tcg_gen_trunc_tl_i32(cpu_crf[crfD(ctx->opcode)], tmp);
+    tcg_temp_free(tmp);
     tcg_gen_andi_i32(cpu_crf[crfD(ctx->opcode)], cpu_crf[crfD(ctx->opcode)], 0xf);
-    tcg_gen_andi_i32(cpu_fpscr, cpu_fpscr, ~(0xF << bfa));
+    tcg_gen_andi_tl(cpu_fpscr, cpu_fpscr, ~(0xF << bfa));
 }
 
 /* mffs */
@@ -2322,7 +2325,7 @@ static void gen_mffs(DisasContext *ctx)
         return;
     }
     gen_reset_fpstatus();
-    tcg_gen_extu_i32_i64(cpu_fpr[rD(ctx->opcode)], cpu_fpscr);
+    tcg_gen_extu_tl_i64(cpu_fpr[rD(ctx->opcode)], cpu_fpscr);
     gen_compute_fprf(cpu_fpr[rD(ctx->opcode)], 0, Rc(ctx->opcode) != 0);
 }
 
@@ -2346,7 +2349,8 @@ static void gen_mtfsb0(DisasContext *ctx)
         tcg_temp_free_i32(t0);
     }
     if (unlikely(Rc(ctx->opcode) != 0)) {
-        tcg_gen_shri_i32(cpu_crf[1], cpu_fpscr, FPSCR_OX);
+        tcg_gen_trunc_tl_i32(cpu_crf[1], cpu_fpscr);
+        tcg_gen_shri_i32(cpu_crf[1], cpu_crf[1], FPSCR_OX);
     }
 }
 
@@ -2371,7 +2375,8 @@ static void gen_mtfsb1(DisasContext *ctx)
         tcg_temp_free_i32(t0);
     }
     if (unlikely(Rc(ctx->opcode) != 0)) {
-        tcg_gen_shri_i32(cpu_crf[1], cpu_fpscr, FPSCR_OX);
+        tcg_gen_trunc_tl_i32(cpu_crf[1], cpu_fpscr);
+        tcg_gen_shri_i32(cpu_crf[1], cpu_crf[1], FPSCR_OX);
     }
     /* We can raise a differed exception */
     gen_helper_float_check_status(cpu_env);
@@ -2397,7 +2402,8 @@ static void gen_mtfsf(DisasContext *ctx)
     gen_helper_store_fpscr(cpu_env, cpu_fpr[rB(ctx->opcode)], t0);
     tcg_temp_free_i32(t0);
     if (unlikely(Rc(ctx->opcode) != 0)) {
-        tcg_gen_shri_i32(cpu_crf[1], cpu_fpscr, FPSCR_OX);
+        tcg_gen_trunc_tl_i32(cpu_crf[1], cpu_fpscr);
+        tcg_gen_shri_i32(cpu_crf[1], cpu_crf[1], FPSCR_OX);
     }
     /* We can raise a differed exception */
     gen_helper_float_check_status(cpu_env);
@@ -2425,7 +2431,8 @@ static void gen_mtfsfi(DisasContext *ctx)
     tcg_temp_free_i64(t0);
     tcg_temp_free_i32(t1);
     if (unlikely(Rc(ctx->opcode) != 0)) {
-        tcg_gen_shri_i32(cpu_crf[1], cpu_fpscr, FPSCR_OX);
+        tcg_gen_trunc_tl_i32(cpu_crf[1], cpu_fpscr);
+        tcg_gen_shri_i32(cpu_crf[1], cpu_crf[1], FPSCR_OX);
     }
     /* We can raise a differed exception */
     gen_helper_float_check_status(cpu_env);
@@ -3466,7 +3473,8 @@ static inline void gen_goto_tb(DisasContext *ctx, int n, target_ulong dest)
         if (unlikely(ctx->singlestep_enabled)) {
             if ((ctx->singlestep_enabled &
                 (CPU_BRANCH_STEP | CPU_SINGLE_STEP)) &&
-                ctx->exception == POWERPC_EXCP_BRANCH) {
+                (ctx->exception == POWERPC_EXCP_BRANCH ||
+                 ctx->exception == POWERPC_EXCP_TRACE)) {
                 target_ulong tmp = ctx->nip;
                 ctx->nip = dest;
                 gen_exception(ctx, POWERPC_EXCP_TRACE);
@@ -4110,29 +4118,21 @@ static void gen_dcbtst(DisasContext *ctx)
 /* dcbz */
 static void gen_dcbz(DisasContext *ctx)
 {
-    TCGv t0;
-    gen_set_access_type(ctx, ACCESS_CACHE);
-    /* NIP cannot be restored if the memory exception comes from an helper */
-    gen_update_nip(ctx, ctx->nip - 4);
-    t0 = tcg_temp_new();
-    gen_addr_reg_index(ctx, t0);
-    gen_helper_dcbz(cpu_env, t0);
-    tcg_temp_free(t0);
-}
+    TCGv tcgv_addr;
+    TCGv_i32 tcgv_is_dcbzl;
+    int is_dcbzl = ctx->opcode & 0x00200000 ? 1 : 0;
 
-static void gen_dcbz_970(DisasContext *ctx)
-{
-    TCGv t0;
     gen_set_access_type(ctx, ACCESS_CACHE);
     /* NIP cannot be restored if the memory exception comes from an helper */
     gen_update_nip(ctx, ctx->nip - 4);
-    t0 = tcg_temp_new();
-    gen_addr_reg_index(ctx, t0);
-    if (ctx->opcode & 0x00200000)
-        gen_helper_dcbz(cpu_env, t0);
-    else
-        gen_helper_dcbz_970(cpu_env, t0);
-    tcg_temp_free(t0);
+    tcgv_addr = tcg_temp_new();
+    tcgv_is_dcbzl = tcg_const_i32(is_dcbzl);
+
+    gen_addr_reg_index(ctx, tcgv_addr);
+    gen_helper_dcbz(cpu_env, tcgv_addr, tcgv_is_dcbzl);
+
+    tcg_temp_free(tcgv_addr);
+    tcg_temp_free_i32(tcgv_is_dcbzl);
 }
 
 /* dst / dstt */
@@ -8640,8 +8640,7 @@ GEN_HANDLER(dcbi, 0x1F, 0x16, 0x0E, 0x03E00001, PPC_CACHE),
 GEN_HANDLER(dcbst, 0x1F, 0x16, 0x01, 0x03E00001, PPC_CACHE),
 GEN_HANDLER(dcbt, 0x1F, 0x16, 0x08, 0x02000001, PPC_CACHE),
 GEN_HANDLER(dcbtst, 0x1F, 0x16, 0x07, 0x02000001, PPC_CACHE),
-GEN_HANDLER(dcbz, 0x1F, 0x16, 0x1F, 0x03E00001, PPC_CACHE_DCBZ),
-GEN_HANDLER2(dcbz_970, "dcbz", 0x1F, 0x16, 0x1F, 0x03C00001, PPC_CACHE_DCBZT),
+GEN_HANDLER(dcbz, 0x1F, 0x16, 0x1F, 0x03C00001, PPC_CACHE_DCBZ),
 GEN_HANDLER(dst, 0x1F, 0x16, 0x0A, 0x01800001, PPC_ALTIVEC),
 GEN_HANDLER(dstst, 0x1F, 0x16, 0x0B, 0x02000001, PPC_ALTIVEC),
 GEN_HANDLER(dss, 0x1F, 0x16, 0x19, 0x019FF801, PPC_ALTIVEC),
@@ -9463,7 +9462,7 @@ void cpu_dump_state (CPUPPCState *env, FILE *f, fprintf_function cpu_fprintf,
         if ((i & (RFPL - 1)) == (RFPL - 1))
             cpu_fprintf(f, "\n");
     }
-    cpu_fprintf(f, "FPSCR %08x\n", env->fpscr);
+    cpu_fprintf(f, "FPSCR " TARGET_FMT_lx "\n", env->fpscr);
 #if !defined(CONFIG_USER_ONLY)
     cpu_fprintf(f, " SRR0 " TARGET_FMT_lx "  SRR1 " TARGET_FMT_lx
                    "    PVR " TARGET_FMT_lx " VRSAVE " TARGET_FMT_lx "\n",
@@ -9617,7 +9616,7 @@ static inline void gen_intermediate_code_internal(CPUPPCState *env,
     int max_insns;
 
     pc_start = tb->pc;
-    gen_opc_end = gen_opc_buf + OPC_MAX_SIZE;
+    gen_opc_end = tcg_ctx.gen_opc_buf + OPC_MAX_SIZE;
     ctx.nip = pc_start;
     ctx.tb = tb;
     ctx.exception = POWERPC_EXCP_NONE;
@@ -9657,7 +9656,8 @@ static inline void gen_intermediate_code_internal(CPUPPCState *env,
 
     gen_icount_start();
     /* Set env in case of segfault during code fetch */
-    while (ctx.exception == POWERPC_EXCP_NONE && gen_opc_ptr < gen_opc_end) {
+    while (ctx.exception == POWERPC_EXCP_NONE
+            && tcg_ctx.gen_opc_ptr < gen_opc_end) {
         if (unlikely(!QTAILQ_EMPTY(&env->breakpoints))) {
             QTAILQ_FOREACH(bp, &env->breakpoints, entry) {
                 if (bp->pc == ctx.nip) {
@@ -9667,15 +9667,15 @@ static inline void gen_intermediate_code_internal(CPUPPCState *env,
             }
         }
         if (unlikely(search_pc)) {
-            j = gen_opc_ptr - gen_opc_buf;
+            j = tcg_ctx.gen_opc_ptr - tcg_ctx.gen_opc_buf;
             if (lj < j) {
                 lj++;
                 while (lj < j)
-                    gen_opc_instr_start[lj++] = 0;
+                    tcg_ctx.gen_opc_instr_start[lj++] = 0;
             }
-            gen_opc_pc[lj] = ctx.nip;
-            gen_opc_instr_start[lj] = 1;
-            gen_opc_icount[lj] = num_insns;
+            tcg_ctx.gen_opc_pc[lj] = ctx.nip;
+            tcg_ctx.gen_opc_instr_start[lj] = 1;
+            tcg_ctx.gen_opc_icount[lj] = num_insns;
         }
         LOG_DISAS("----------------\n");
         LOG_DISAS("nip=" TARGET_FMT_lx " super=%d ir=%d\n",
@@ -9689,7 +9689,7 @@ static inline void gen_intermediate_code_internal(CPUPPCState *env,
         }
         LOG_DISAS("translate opcode %08x (%02x %02x %02x) (%s)\n",
                     ctx.opcode, opc1(ctx.opcode), opc2(ctx.opcode),
-                    opc3(ctx.opcode), little_endian ? "little" : "big");
+                    opc3(ctx.opcode), ctx.le_mode ? "little" : "big");
         if (unlikely(qemu_loglevel_mask(CPU_LOG_TB_OP | CPU_LOG_TB_OP_OPT))) {
             tcg_gen_debug_insn_start(ctx.nip);
         }
@@ -9767,12 +9767,12 @@ static inline void gen_intermediate_code_internal(CPUPPCState *env,
         tcg_gen_exit_tb(0);
     }
     gen_icount_end(tb, num_insns);
-    *gen_opc_ptr = INDEX_op_end;
+    *tcg_ctx.gen_opc_ptr = INDEX_op_end;
     if (unlikely(search_pc)) {
-        j = gen_opc_ptr - gen_opc_buf;
+        j = tcg_ctx.gen_opc_ptr - tcg_ctx.gen_opc_buf;
         lj++;
         while (lj <= j)
-            gen_opc_instr_start[lj++] = 0;
+            tcg_ctx.gen_opc_instr_start[lj++] = 0;
     } else {
         tb->size = ctx.nip - pc_start;
         tb->icount = num_insns;
@@ -9783,7 +9783,7 @@ static inline void gen_intermediate_code_internal(CPUPPCState *env,
         flags = env->bfd_mach;
         flags |= ctx.le_mode << 16;
         qemu_log("IN: %s\n", lookup_symbol(pc_start));
-        log_target_disas(pc_start, ctx.nip - pc_start, flags);
+        log_target_disas(env, pc_start, ctx.nip - pc_start, flags);
         qemu_log("\n");
     }
 #endif
@@ -9801,5 +9801,5 @@ void gen_intermediate_code_pc (CPUPPCState *env, struct TranslationBlock *tb)
 
 void restore_state_to_opc(CPUPPCState *env, TranslationBlock *tb, int pc_pos)
 {
-    env->nip = gen_opc_pc[pc_pos];
+    env->nip = tcg_ctx.gen_opc_pc[pc_pos];
 }

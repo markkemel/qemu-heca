@@ -147,7 +147,7 @@ static inline void pxa2xx_dma_descriptor_fetch(
                 PXA2xxDMAState *s, int ch)
 {
     uint32_t desc[4];
-    target_phys_addr_t daddr = s->chan[ch].descr & ~0xf;
+    hwaddr daddr = s->chan[ch].descr & ~0xf;
     if ((s->chan[ch].descr & DDADR_BREN) && (s->chan[ch].state & DCSR_CMPST))
         daddr += 32;
 
@@ -251,7 +251,7 @@ static void pxa2xx_dma_run(PXA2xxDMAState *s)
     }
 }
 
-static uint64_t pxa2xx_dma_read(void *opaque, target_phys_addr_t offset,
+static uint64_t pxa2xx_dma_read(void *opaque, hwaddr offset,
                                 unsigned size)
 {
     PXA2xxDMAState *s = (PXA2xxDMAState *) opaque;
@@ -310,7 +310,7 @@ static uint64_t pxa2xx_dma_read(void *opaque, target_phys_addr_t offset,
     return 7;
 }
 
-static void pxa2xx_dma_write(void *opaque, target_phys_addr_t offset,
+static void pxa2xx_dma_write(void *opaque, hwaddr offset,
                              uint64_t value, unsigned size)
 {
     PXA2xxDMAState *s = (PXA2xxDMAState *) opaque;
@@ -473,7 +473,7 @@ static int pxa2xx_dma_init(SysBusDevice *dev)
     return 0;
 }
 
-DeviceState *pxa27x_dma_init(target_phys_addr_t base, qemu_irq irq)
+DeviceState *pxa27x_dma_init(hwaddr base, qemu_irq irq)
 {
     DeviceState *dev;
 
@@ -481,13 +481,13 @@ DeviceState *pxa27x_dma_init(target_phys_addr_t base, qemu_irq irq)
     qdev_prop_set_int32(dev, "channels", PXA27X_DMA_NUM_CHANNELS);
     qdev_init_nofail(dev);
 
-    sysbus_mmio_map(sysbus_from_qdev(dev), 0, base);
-    sysbus_connect_irq(sysbus_from_qdev(dev), 0, irq);
+    sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, base);
+    sysbus_connect_irq(SYS_BUS_DEVICE(dev), 0, irq);
 
     return dev;
 }
 
-DeviceState *pxa255_dma_init(target_phys_addr_t base, qemu_irq irq)
+DeviceState *pxa255_dma_init(hwaddr base, qemu_irq irq)
 {
     DeviceState *dev;
 
@@ -495,8 +495,8 @@ DeviceState *pxa255_dma_init(target_phys_addr_t base, qemu_irq irq)
     qdev_prop_set_int32(dev, "channels", PXA27X_DMA_NUM_CHANNELS);
     qdev_init_nofail(dev);
 
-    sysbus_mmio_map(sysbus_from_qdev(dev), 0, base);
-    sysbus_connect_irq(sysbus_from_qdev(dev), 0, irq);
+    sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, base);
+    sysbus_connect_irq(SYS_BUS_DEVICE(dev), 0, irq);
 
     return dev;
 }
@@ -559,7 +559,7 @@ static void pxa2xx_dma_class_init(ObjectClass *klass, void *data)
     dc->props = pxa2xx_dma_properties;
 }
 
-static TypeInfo pxa2xx_dma_info = {
+static const TypeInfo pxa2xx_dma_info = {
     .name          = "pxa2xx-dma",
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(PXA2xxDMAState),

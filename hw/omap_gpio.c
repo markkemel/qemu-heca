@@ -61,7 +61,7 @@ static void omap_gpio_set(void *opaque, int line, int level)
     }
 }
 
-static uint64_t omap_gpio_read(void *opaque, target_phys_addr_t addr,
+static uint64_t omap_gpio_read(void *opaque, hwaddr addr,
                                unsigned size)
 {
     struct omap_gpio_s *s = (struct omap_gpio_s *) opaque;
@@ -99,7 +99,7 @@ static uint64_t omap_gpio_read(void *opaque, target_phys_addr_t addr,
     return 0;
 }
 
-static void omap_gpio_write(void *opaque, target_phys_addr_t addr,
+static void omap_gpio_write(void *opaque, hwaddr addr,
                             uint64_t value, unsigned size)
 {
     struct omap_gpio_s *s = (struct omap_gpio_s *) opaque;
@@ -300,7 +300,7 @@ static void omap2_gpio_module_reset(struct omap2_gpio_s *s)
     s->delay = 0;
 }
 
-static uint32_t omap2_gpio_module_read(void *opaque, target_phys_addr_t addr)
+static uint32_t omap2_gpio_module_read(void *opaque, hwaddr addr)
 {
     struct omap2_gpio_s *s = (struct omap2_gpio_s *) opaque;
 
@@ -372,7 +372,7 @@ static uint32_t omap2_gpio_module_read(void *opaque, target_phys_addr_t addr)
     return 0;
 }
 
-static void omap2_gpio_module_write(void *opaque, target_phys_addr_t addr,
+static void omap2_gpio_module_write(void *opaque, hwaddr addr,
                 uint32_t value)
 {
     struct omap2_gpio_s *s = (struct omap2_gpio_s *) opaque;
@@ -514,12 +514,12 @@ static void omap2_gpio_module_write(void *opaque, target_phys_addr_t addr,
     }
 }
 
-static uint32_t omap2_gpio_module_readp(void *opaque, target_phys_addr_t addr)
+static uint32_t omap2_gpio_module_readp(void *opaque, hwaddr addr)
 {
     return omap2_gpio_module_read(opaque, addr & ~3) >> ((addr & 3) << 3);
 }
 
-static void omap2_gpio_module_writep(void *opaque, target_phys_addr_t addr,
+static void omap2_gpio_module_writep(void *opaque, hwaddr addr,
                 uint32_t value)
 {
     uint32_t cur = 0;
@@ -588,7 +588,7 @@ static const MemoryRegionOps omap2_gpio_module_ops = {
 static void omap_gpif_reset(DeviceState *dev)
 {
     struct omap_gpif_s *s = FROM_SYSBUS(struct omap_gpif_s,
-                    sysbus_from_qdev(dev));
+                    SYS_BUS_DEVICE(dev));
     omap_gpio_reset(&s->omap1);
 }
 
@@ -596,7 +596,7 @@ static void omap2_gpif_reset(DeviceState *dev)
 {
     int i;
     struct omap2_gpif_s *s = FROM_SYSBUS(struct omap2_gpif_s,
-                    sysbus_from_qdev(dev));
+                    SYS_BUS_DEVICE(dev));
     for (i = 0; i < s->modulecount; i++) {
         omap2_gpio_module_reset(&s->modules[i]);
     }
@@ -604,7 +604,7 @@ static void omap2_gpif_reset(DeviceState *dev)
     s->gpo = 0;
 }
 
-static uint64_t omap2_gpif_top_read(void *opaque, target_phys_addr_t addr,
+static uint64_t omap2_gpif_top_read(void *opaque, hwaddr addr,
                                     unsigned size)
 {
     struct omap2_gpif_s *s = (struct omap2_gpif_s *) opaque;
@@ -633,7 +633,7 @@ static uint64_t omap2_gpif_top_read(void *opaque, target_phys_addr_t addr,
     return 0;
 }
 
-static void omap2_gpif_top_write(void *opaque, target_phys_addr_t addr,
+static void omap2_gpif_top_write(void *opaque, hwaddr addr,
                                  uint64_t value, unsigned size)
 {
     struct omap2_gpif_s *s = (struct omap2_gpif_s *) opaque;
@@ -747,7 +747,7 @@ static void omap_gpio_class_init(ObjectClass *klass, void *data)
     dc->props = omap_gpio_properties;
 }
 
-static TypeInfo omap_gpio_info = {
+static const TypeInfo omap_gpio_info = {
     .name          = "omap-gpio",
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(struct omap_gpif_s),
@@ -776,7 +776,7 @@ static void omap2_gpio_class_init(ObjectClass *klass, void *data)
     dc->props = omap2_gpio_properties;
 }
 
-static TypeInfo omap2_gpio_info = {
+static const TypeInfo omap2_gpio_info = {
     .name          = "omap2-gpio",
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(struct omap2_gpif_s),

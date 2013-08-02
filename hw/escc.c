@@ -25,8 +25,8 @@
 #include "hw.h"
 #include "sysbus.h"
 #include "escc.h"
-#include "qemu-char.h"
-#include "console.h"
+#include "char/char.h"
+#include "ui/console.h"
 #include "trace.h"
 
 /*
@@ -463,7 +463,7 @@ static void escc_update_parameters(ChannelState *s)
     qemu_chr_fe_ioctl(s->chr, CHR_IOCTL_SERIAL_SET_PARAMS, &ssp);
 }
 
-static void escc_mem_write(void *opaque, target_phys_addr_t addr,
+static void escc_mem_write(void *opaque, hwaddr addr,
                            uint64_t val, unsigned size)
 {
     SerialState *serial = opaque;
@@ -565,7 +565,7 @@ static void escc_mem_write(void *opaque, target_phys_addr_t addr,
     }
 }
 
-static uint64_t escc_mem_read(void *opaque, target_phys_addr_t addr,
+static uint64_t escc_mem_read(void *opaque, hwaddr addr,
                               unsigned size)
 {
     SerialState *serial = opaque;
@@ -683,7 +683,7 @@ static const VMStateDescription vmstate_escc = {
     }
 };
 
-MemoryRegion *escc_init(target_phys_addr_t base, qemu_irq irqA, qemu_irq irqB,
+MemoryRegion *escc_init(hwaddr base, qemu_irq irqA, qemu_irq irqB,
               CharDriverState *chrA, CharDriverState *chrB,
               int clock, int it_shift)
 {
@@ -700,7 +700,7 @@ MemoryRegion *escc_init(target_phys_addr_t base, qemu_irq irqA, qemu_irq irqB,
     qdev_prop_set_uint32(dev, "chnBtype", ser);
     qdev_prop_set_uint32(dev, "chnAtype", ser);
     qdev_init_nofail(dev);
-    s = sysbus_from_qdev(dev);
+    s = SYS_BUS_DEVICE(dev);
     sysbus_connect_irq(s, 0, irqB);
     sysbus_connect_irq(s, 1, irqA);
     if (base) {
@@ -846,7 +846,7 @@ static void sunmouse_event(void *opaque,
     put_queue(s, 0);
 }
 
-void slavio_serial_ms_kbd_init(target_phys_addr_t base, qemu_irq irq,
+void slavio_serial_ms_kbd_init(hwaddr base, qemu_irq irq,
                                int disabled, int clock, int it_shift)
 {
     DeviceState *dev;
@@ -861,7 +861,7 @@ void slavio_serial_ms_kbd_init(target_phys_addr_t base, qemu_irq irq,
     qdev_prop_set_uint32(dev, "chnBtype", mouse);
     qdev_prop_set_uint32(dev, "chnAtype", kbd);
     qdev_init_nofail(dev);
-    s = sysbus_from_qdev(dev);
+    s = SYS_BUS_DEVICE(dev);
     sysbus_connect_irq(s, 0, irq);
     sysbus_connect_irq(s, 1, irq);
     sysbus_mmio_map(s, 0, base);
@@ -923,7 +923,7 @@ static void escc_class_init(ObjectClass *klass, void *data)
     dc->props = escc_properties;
 }
 
-static TypeInfo escc_info = {
+static const TypeInfo escc_info = {
     .name          = "escc",
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(SerialState),

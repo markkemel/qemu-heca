@@ -8,9 +8,9 @@
  */
 
 #include "sysbus.h"
-#include "pci.h"
-#include "pci_host.h"
-#include "exec-memory.h"
+#include "pci/pci.h"
+#include "pci/pci_host.h"
+#include "exec/address-spaces.h"
 
 typedef struct {
     SysBusDevice busdev;
@@ -21,18 +21,18 @@ typedef struct {
     MemoryRegion isa;
 } PCIVPBState;
 
-static inline uint32_t vpb_pci_config_addr(target_phys_addr_t addr)
+static inline uint32_t vpb_pci_config_addr(hwaddr addr)
 {
     return addr & 0xffffff;
 }
 
-static void pci_vpb_config_write(void *opaque, target_phys_addr_t addr,
+static void pci_vpb_config_write(void *opaque, hwaddr addr,
                                  uint64_t val, unsigned size)
 {
     pci_data_write(opaque, vpb_pci_config_addr(addr), val, size);
 }
 
-static uint64_t pci_vpb_config_read(void *opaque, target_phys_addr_t addr,
+static uint64_t pci_vpb_config_read(void *opaque, hwaddr addr,
                                     unsigned size)
 {
     uint32_t val;
@@ -119,7 +119,7 @@ static void versatile_pci_host_class_init(ObjectClass *klass, void *data)
     k->class_id = PCI_CLASS_PROCESSOR_CO;
 }
 
-static TypeInfo versatile_pci_host_info = {
+static const TypeInfo versatile_pci_host_info = {
     .name          = "versatile_pci_host",
     .parent        = TYPE_PCI_DEVICE,
     .instance_size = sizeof(PCIDevice),
@@ -133,7 +133,7 @@ static void pci_vpb_class_init(ObjectClass *klass, void *data)
     sdc->init = pci_vpb_init;
 }
 
-static TypeInfo pci_vpb_info = {
+static const TypeInfo pci_vpb_info = {
     .name          = "versatile_pci",
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(PCIVPBState),
@@ -147,7 +147,7 @@ static void pci_realview_class_init(ObjectClass *klass, void *data)
     sdc->init = pci_realview_init;
 }
 
-static TypeInfo pci_realview_info = {
+static const TypeInfo pci_realview_info = {
     .name          = "realview_pci",
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(PCIVPBState),

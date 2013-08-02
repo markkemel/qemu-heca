@@ -21,18 +21,13 @@
 #include <zlib.h>
 
 #include "qemu-common.h"
-#include "qemu-timer.h"
-#include "qemu-queue.h"
-#include "monitor.h"
-#include "sysemu.h"
+#include "qemu/timer.h"
+#include "qemu/queue.h"
+#include "monitor/monitor.h"
+#include "sysemu/sysemu.h"
 #include "trace.h"
 
 #include "qxl.h"
-
-#ifndef CONFIG_QXL_IO_MONITORS_CONFIG_ASYNC
-/* spice-protocol is too old, add missing definitions */
-#define QXL_IO_MONITORS_CONFIG_ASYNC (QXL_IO_FLUSH_RELEASE + 1)
-#endif
 
 /*
  * NOTE: SPICE_RING_PROD_ITEM accesses memory on the pci bar and as
@@ -42,33 +37,25 @@
  */
 #undef SPICE_RING_PROD_ITEM
 #define SPICE_RING_PROD_ITEM(qxl, r, ret) {                             \
-        typeof(r) start = r;                                            \
-        typeof(r) end = r + 1;                                          \
         uint32_t prod = (r)->prod & SPICE_RING_INDEX_MASK(r);           \
-        typeof(&(r)->items[prod]) m_item = &(r)->items[prod];           \
-        if (!((uint8_t*)m_item >= (uint8_t*)(start) && (uint8_t*)(m_item + 1) <= (uint8_t*)(end))) { \
+        if (prod >= ARRAY_SIZE((r)->items)) {                           \
             qxl_set_guest_bug(qxl, "SPICE_RING_PROD_ITEM indices mismatch " \
-                          "! %p <= %p < %p", (uint8_t *)start,          \
-                          (uint8_t *)m_item, (uint8_t *)end);           \
+                          "%u >= %zu", prod, ARRAY_SIZE((r)->items));   \
             ret = NULL;                                                 \
         } else {                                                        \
-            ret = &m_item->el;                                          \
+            ret = &(r)->items[prod].el;                                 \
         }                                                               \
     }
 
 #undef SPICE_RING_CONS_ITEM
 #define SPICE_RING_CONS_ITEM(qxl, r, ret) {                             \
-        typeof(r) start = r;                                            \
-        typeof(r) end = r + 1;                                          \
         uint32_t cons = (r)->cons & SPICE_RING_INDEX_MASK(r);           \
-        typeof(&(r)->items[cons]) m_item = &(r)->items[cons];           \
-        if (!((uint8_t*)m_item >= (uint8_t*)(start) && (uint8_t*)(m_item + 1) <= (uint8_t*)(end))) { \
+        if (cons >= ARRAY_SIZE((r)->items)) {                           \
             qxl_set_guest_bug(qxl, "SPICE_RING_CONS_ITEM indices mismatch " \
-                          "! %p <= %p < %p", (uint8_t *)start,          \
-                          (uint8_t *)m_item, (uint8_t *)end);           \
+                          "%u >= %zu", cons, ARRAY_SIZE((r)->items));   \
             ret = NULL;                                                 \
         } else {                                                        \
-            ret = &m_item->el;                                          \
+            ret = &(r)->items[cons].el;                                 \
         }                                                               \
     }
 
@@ -93,9 +80,7 @@
 
 #define QXL_MODE_EX(x_res, y_res)                 \
     QXL_MODE_16_32(x_res, y_res, 0),              \
-    QXL_MODE_16_32(y_res, x_res, 1),              \
-    QXL_MODE_16_32(x_res, y_res, 2),              \
-    QXL_MODE_16_32(y_res, x_res, 3)
+    QXL_MODE_16_32(x_res, y_res, 1)
 
 static QXLMode qxl_modes[] = {
     QXL_MODE_EX(640, 480),
@@ -262,9 +247,6 @@ static void qxl_spice_destroy_surfaces(PCIQXLDevice *qxl, qxl_async_io async)
 static void qxl_spice_monitors_config_async(PCIQXLDevice *qxl, int replay)
 {
     trace_qxl_spice_monitors_config(qxl->id);
-/* 0x000b01 == 0.11.1 */
-#if SPICE_SERVER_VERSION >= 0x000b01 && \
-    defined(CONFIG_QXL_IO_MONITORS_CONFIG_ASYNC)
     if (replay) {
         /*
          * don't use QXL_COOKIE_TYPE_IO:
@@ -286,10 +268,6 @@ static void qxl_spice_monitors_config_async(PCIQXLDevice *qxl, int replay)
                 (uintptr_t)qxl_cookie_new(QXL_COOKIE_TYPE_IO,
                                           QXL_IO_MONITORS_CONFIG_ASYNC));
     }
-#else
-    fprintf(stderr, "qxl: too old spice-protocol/spice-server for "
-            "QXL_IO_MONITORS_CONFIG_ASYNC\n");
-#endif
 }
 
 void qxl_spice_reset_image_cache(PCIQXLDevice *qxl)
@@ -305,6 +283,10 @@ void qxl_spice_reset_cursor(PCIQXLDevice *qxl)
     qemu_mutex_lock(&qxl->track_lock);
     qxl->guest_cursor = 0;
     qemu_mutex_unlock(&qxl->track_lock);
+    if (qxl->ssd.cursor) {
+        cursor_put(qxl->ssd.cursor);
+    }
+    qxl->ssd.cursor = cursor_builtin_hidden();
 }
 
 
@@ -322,10 +304,13 @@ static inline uint32_t msb_mask(uint32_t val)
 
 static ram_addr_t qxl_rom_size(void)
 {
-    uint32_t rom_size = sizeof(QXLRom) + sizeof(QXLModes) + sizeof(qxl_modes);
+    uint32_t required_rom_size = sizeof(QXLRom) + sizeof(QXLModes) +
+                                 sizeof(qxl_modes);
+    uint32_t rom_size = 8192; /* two pages */
 
-    rom_size = MAX(rom_size, TARGET_PAGE_SIZE);
-    rom_size = msb_mask(rom_size * 2 - 1);
+    required_rom_size = MAX(required_rom_size, TARGET_PAGE_SIZE);
+    required_rom_size = msb_mask(required_rom_size * 2 - 1);
+    assert(required_rom_size <= rom_size);
     return rom_size;
 }
 
@@ -457,6 +442,12 @@ static int qxl_track_command(PCIQXLDevice *qxl, struct QXLCommandExt *ext)
         if (id >= qxl->ssd.num_surfaces) {
             qxl_set_guest_bug(qxl, "QXL_CMD_SURFACE id %d >= %d", id,
                               qxl->ssd.num_surfaces);
+            return 1;
+        }
+        if (cmd->type == QXL_SURFACE_CMD_CREATE &&
+            (cmd->u.surface_create.stride & 0x03) != 0) {
+            qxl_set_guest_bug(qxl, "QXL_CMD_SURFACE stride = %d %% 4 != 0\n",
+                              cmd->u.surface_create.stride);
             return 1;
         }
         qemu_mutex_lock(&qxl->track_lock);
@@ -948,8 +939,6 @@ static void interface_async_complete(QXLInstance *sin, uint64_t cookie_token)
     }
 }
 
-#if SPICE_SERVER_VERSION >= 0x000b04
-
 /* called from spice server thread context only */
 static void interface_set_client_capabilities(QXLInstance *sin,
                                               uint8_t client_present,
@@ -957,24 +946,27 @@ static void interface_set_client_capabilities(QXLInstance *sin,
 {
     PCIQXLDevice *qxl = container_of(sin, PCIQXLDevice, ssd.qxl);
 
+    if (qxl->revision < 4) {
+        trace_qxl_set_client_capabilities_unsupported_by_revision(qxl->id,
+                                                              qxl->revision);
+        return;
+    }
+
     if (runstate_check(RUN_STATE_INMIGRATE) ||
         runstate_check(RUN_STATE_POSTMIGRATE)) {
         return;
     }
 
     qxl->shadow_rom.client_present = client_present;
-    memcpy(qxl->shadow_rom.client_capabilities, caps, sizeof(caps));
+    memcpy(qxl->shadow_rom.client_capabilities, caps,
+           sizeof(qxl->shadow_rom.client_capabilities));
     qxl->rom->client_present = client_present;
-    memcpy(qxl->rom->client_capabilities, caps, sizeof(caps));
+    memcpy(qxl->rom->client_capabilities, caps,
+           sizeof(qxl->rom->client_capabilities));
     qxl_rom_set_dirty(qxl);
 
     qxl_send_events(qxl, QXL_INTERRUPT_CLIENT);
 }
-
-#endif
-
-#if defined(CONFIG_QXL_CLIENT_MONITORS_CONFIG) \
-    && SPICE_SERVER_VERSION >= 0x000b05
 
 static uint32_t qxl_crc32(const uint8_t *p, unsigned len)
 {
@@ -994,6 +986,11 @@ static int interface_client_monitors_config(QXLInstance *sin,
     QXLRom *rom = memory_region_get_ram_ptr(&qxl->rom_bar);
     int i;
 
+    if (qxl->revision < 4) {
+        trace_qxl_client_monitors_config_unsupported_by_device(qxl->id,
+                                                               qxl->revision);
+        return 0;
+    }
     /*
      * Older windows drivers set int_mask to 0 when their ISR is called,
      * then later set it to ~0. So it doesn't relate to the actual interrupts
@@ -1044,7 +1041,6 @@ static int interface_client_monitors_config(QXLInstance *sin,
     qxl_send_events(qxl, QXL_INTERRUPT_CLIENT_MONITORS_CONFIG);
     return 1;
 }
-#endif
 
 static const QXLInterface qxl_interface = {
     .base.type               = SPICE_INTERFACE_QXL,
@@ -1067,13 +1063,8 @@ static const QXLInterface qxl_interface = {
     .flush_resources         = interface_flush_resources,
     .async_complete          = interface_async_complete,
     .update_area_complete    = interface_update_area_complete,
-#if SPICE_SERVER_VERSION >= 0x000b04
     .set_client_capabilities = interface_set_client_capabilities,
-#endif
-#if SPICE_SERVER_VERSION >= 0x000b05 && \
-    defined(CONFIG_QXL_CLIENT_MONITORS_CONFIG)
     .client_monitors_config = interface_client_monitors_config,
-#endif
 };
 
 static void qxl_enter_vga_mode(PCIQXLDevice *d)
@@ -1084,7 +1075,7 @@ static void qxl_enter_vga_mode(PCIQXLDevice *d)
     trace_qxl_enter_vga_mode(d->id);
     qemu_spice_create_host_primary(&d->ssd);
     d->mode = QXL_MODE_VGA;
-    memset(&d->ssd.dirty, 0, sizeof(d->ssd.dirty));
+    dpy_gfx_resize(d->ssd.ds);
     vga_dirty_log_start(&d->vga);
 }
 
@@ -1382,6 +1373,12 @@ static void qxl_create_guest_primary(PCIQXLDevice *qxl, int loadvm,
     trace_qxl_create_guest_primary_rest(qxl->id, sc->stride, sc->type,
                                         sc->flags);
 
+    if ((surface.stride & 0x3) != 0) {
+        qxl_set_guest_bug(qxl, "primary surface stride = %d %% 4 != 0",
+                          surface.stride);
+        return;
+    }
+
     surface.mouse_mode = true;
     surface.group_id   = MEMSLOT_GROUP_GUEST;
     if (loadvm) {
@@ -1453,7 +1450,7 @@ static void qxl_set_mode(PCIQXLDevice *d, int modenr, int loadvm)
     qxl_rom_set_dirty(d);
 }
 
-static void ioport_write(void *opaque, target_phys_addr_t addr,
+static void ioport_write(void *opaque, hwaddr addr,
                          uint64_t val, unsigned size)
 {
     PCIQXLDevice *d = opaque;
@@ -1461,12 +1458,12 @@ static void ioport_write(void *opaque, target_phys_addr_t addr,
     qxl_async_io async = QXL_SYNC;
     uint32_t orig_io_port = io_port;
 
-    if (d->guest_bug && !io_port == QXL_IO_RESET) {
+    if (d->guest_bug && io_port != QXL_IO_RESET) {
         return;
     }
 
     if (d->revision <= QXL_REVISION_STABLE_V10 &&
-        io_port >= QXL_IO_FLUSH_SURFACES_ASYNC) {
+        io_port > QXL_IO_FLUSH_RELEASE) {
         qxl_set_guest_bug(d, "unsupported io %d for revision %d\n",
             io_port, d->revision);
         return;
@@ -1547,20 +1544,13 @@ async_common:
         if (d->ram->update_surface > d->ssd.num_surfaces) {
             qxl_set_guest_bug(d, "QXL_IO_UPDATE_AREA: invalid surface id %d\n",
                               d->ram->update_surface);
-            return;
+            break;
         }
-        if (update.left >= update.right || update.top >= update.bottom) {
+        if (update.left >= update.right || update.top >= update.bottom ||
+            update.left < 0 || update.top < 0) {
             qxl_set_guest_bug(d,
                     "QXL_IO_UPDATE_AREA: invalid area (%ux%u)x(%ux%u)\n",
                     update.left, update.top, update.right, update.bottom);
-            return;
-        }
-
-        if (update.left < 0 || update.top < 0 || update.left >= update.right ||
-            update.top >= update.bottom) {
-            qxl_set_guest_bug(d, "QXL_IO_UPDATE_AREA: "
-                              "invalid area(%d,%d,%d,%d)\n", update.left,
-                              update.right, update.top, update.bottom);
             break;
         }
         if (async == QXL_ASYNC) {
@@ -1685,7 +1675,7 @@ cancel_async:
     }
 }
 
-static uint64_t ioport_read(void *opaque, target_phys_addr_t addr,
+static uint64_t ioport_read(void *opaque, hwaddr addr,
                             unsigned size)
 {
     PCIQXLDevice *qxl = opaque;
@@ -1721,7 +1711,13 @@ static void qxl_send_events(PCIQXLDevice *d, uint32_t events)
     uint32_t le_events = cpu_to_le32(events);
 
     trace_qxl_send_events(d->id, events);
-    assert(qemu_spice_display_is_running(&d->ssd));
+    if (!qemu_spice_display_is_running(&d->ssd)) {
+        /* spice-server tracks guest running state and should not do this */
+        fprintf(stderr, "%s: spice-server bug: guest stopped, ignoring\n",
+                __func__);
+        trace_qxl_send_events_vm_stopped(d->id, events);
+        return;
+    }
     old_pending = __sync_fetch_and_or(&d->ram->int_pending, le_events);
     if ((old_pending & le_events) == le_events) {
         return;
@@ -1811,7 +1807,7 @@ static void qxl_hw_text_update(void *opaque, console_ch_t *chardata)
 
 static void qxl_dirty_surfaces(PCIQXLDevice *qxl)
 {
-    intptr_t vram_start;
+    uintptr_t vram_start;
     int i;
 
     if (qxl->mode != QXL_MODE_NATIVE && qxl->mode != QXL_MODE_COMPAT) {
@@ -1822,7 +1818,7 @@ static void qxl_dirty_surfaces(PCIQXLDevice *qxl)
     qxl_set_dirty(&qxl->vga.vram, qxl->shadow_rom.draw_area_offset,
                   qxl->shadow_rom.surface0_area_size);
 
-    vram_start =  (intptr_t)memory_region_get_ram_ptr(&qxl->vram_bar);
+    vram_start = (uintptr_t)memory_region_get_ram_ptr(&qxl->vram_bar);
 
     /* dirty the off-screen surfaces */
     for (i = 0; i < qxl->ssd.num_surfaces; i++) {
@@ -1854,7 +1850,6 @@ static void qxl_vm_change_state_handler(void *opaque, int running,
                                         RunState state)
 {
     PCIQXLDevice *qxl = opaque;
-    qemu_spice_vm_change_state_handler(&qxl->ssd, running, state);
 
     if (running) {
         /*
@@ -1897,8 +1892,8 @@ static void display_refresh(struct DisplayState *ds)
 }
 
 static DisplayChangeListener display_listener = {
-    .dpy_update  = display_update,
-    .dpy_resize  = display_resize,
+    .dpy_gfx_update  = display_update,
+    .dpy_gfx_resize  = display_resize,
     .dpy_refresh = display_refresh,
 };
 
@@ -1971,14 +1966,10 @@ static int qxl_init_common(PCIQXLDevice *qxl)
         pci_device_rev = QXL_REVISION_STABLE_V10;
         io_size = 32; /* PCI region size must be pow2 */
         break;
-/* 0x000b01 == 0.11.1 */
-#if SPICE_SERVER_VERSION >= 0x000b01 && \
-        defined(CONFIG_QXL_IO_MONITORS_CONFIG_ASYNC)
     case 4: /* qxl-4 */
         pci_device_rev = QXL_REVISION_STABLE_V12;
         io_size = msb_mask(QXL_IO_RANGE_SIZE * 2 - 1);
         break;
-#endif
     default:
         error_report("Invalid revision %d for qxl device (max %d)",
                      qxl->revision, QXL_DEFAULT_REVISION);
@@ -2044,7 +2035,11 @@ static int qxl_init_common(PCIQXLDevice *qxl)
 
     qxl->ssd.qxl.base.sif = &qxl_interface.base;
     qxl->ssd.qxl.id = qxl->id;
-    qemu_spice_add_interface(&qxl->ssd.qxl.base);
+    if (qemu_spice_add_interface(&qxl->ssd.qxl.base) != 0) {
+        error_report("qxl interface %d.%d not supported by spice-server",
+                     SPICE_INTERFACE_QXL_MAJOR, SPICE_INTERFACE_QXL_MINOR);
+        return -1;
+    }
     qemu_add_vm_change_state_handler(qxl_vm_change_state_handler, qxl);
 
     init_pipe_signaling(qxl);
@@ -2060,6 +2055,7 @@ static int qxl_init_primary(PCIDevice *dev)
     PCIQXLDevice *qxl = DO_UPCAST(PCIQXLDevice, pci, dev);
     VGACommonState *vga = &qxl->vga;
     PortioList *qxl_vga_port_list = g_new(PortioList, 1);
+    int rc;
 
     qxl->id = 0;
     qxl_init_ramsize(qxl);
@@ -2074,9 +2070,14 @@ static int qxl_init_primary(PCIDevice *dev)
     qemu_spice_display_init_common(&qxl->ssd, vga->ds);
 
     qxl0 = qxl;
-    register_displaychangelistener(vga->ds, &display_listener);
 
-    return qxl_init_common(qxl);
+    rc = qxl_init_common(qxl);
+    if (rc != 0) {
+        return rc;
+    }
+
+    register_displaychangelistener(vga->ds, &display_listener);
+    return rc;
 }
 
 static int qxl_init_secondary(PCIDevice *dev)
@@ -2151,6 +2152,7 @@ static int qxl_post_load(void *opaque, int version)
 
     switch (newmode) {
     case QXL_MODE_UNDEFINED:
+        qxl_create_memslots(d);
         break;
     case QXL_MODE_VGA:
         qxl_create_memslots(d);
@@ -2314,7 +2316,7 @@ static void qxl_primary_class_init(ObjectClass *klass, void *data)
     dc->props = qxl_properties;
 }
 
-static TypeInfo qxl_primary_info = {
+static const TypeInfo qxl_primary_info = {
     .name          = "qxl-vga",
     .parent        = TYPE_PCI_DEVICE,
     .instance_size = sizeof(PCIQXLDevice),
@@ -2336,7 +2338,7 @@ static void qxl_secondary_class_init(ObjectClass *klass, void *data)
     dc->props = qxl_properties;
 }
 
-static TypeInfo qxl_secondary_info = {
+static const TypeInfo qxl_secondary_info = {
     .name          = "qxl",
     .parent        = TYPE_PCI_DEVICE,
     .instance_size = sizeof(PCIQXLDevice),

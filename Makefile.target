@@ -31,8 +31,14 @@ PROGS+=$(QEMU_PROGW)
 endif
 STPFILES=
 
+LIBS+=-lz
+
 ifndef CONFIG_HAIKU
 LIBS+=-lm
+endif
+
+ifdef CONFIG_HECA
+LIBS+=-lheca -pthread
 endif
 
 config-target.h: config-target.h-timestamp
@@ -54,7 +60,7 @@ $(QEMU_PROG).stp: $(SRC_PATH)/trace-events
 		--binary=$(bindir)/$(QEMU_PROG) \
 		--target-arch=$(TARGET_ARCH) \
 		--target-type=$(TARGET_TYPE) \
-		< $< > $@,"  GEN   $(QEMU_PROG).stp")
+		< $< > $@,"  GEN   $(TARGET_DIR)$(QEMU_PROG).stp")
 else
 stap:
 endif
@@ -69,13 +75,11 @@ all: $(PROGS) stap
 obj-y = exec.o translate-all.o cpu-exec.o
 obj-y += tcg/tcg.o tcg/optimize.o
 obj-$(CONFIG_TCG_INTERPRETER) += tci.o
+obj-$(CONFIG_TCG_INTERPRETER) += disas/tci.o
 obj-y += fpu/softfloat.o
-obj-y += disas.o
-obj-$(CONFIG_TCI_DIS) += tci-dis.o
 obj-y += target-$(TARGET_BASE_ARCH)/
+obj-y += disas.o
 obj-$(CONFIG_GDBSTUB_XML) += gdbstub-xml.o
-
-tci-dis.o: QEMU_CFLAGS += -I$(SRC_PATH)/tcg -I$(SRC_PATH)/tcg/tci
 
 #########################################################
 # Linux user emulator target
@@ -85,7 +89,7 @@ ifdef CONFIG_LINUX_USER
 QEMU_CFLAGS+=-I$(SRC_PATH)/linux-user/$(TARGET_ABI_DIR) -I$(SRC_PATH)/linux-user
 
 obj-y += linux-user/
-obj-y += gdbstub.o thunk.o user-exec.o $(oslib-obj-y)
+obj-y += gdbstub.o thunk.o user-exec.o
 
 endif #CONFIG_LINUX_USER
 
@@ -97,7 +101,7 @@ ifdef CONFIG_BSD_USER
 QEMU_CFLAGS+=-I$(SRC_PATH)/bsd-user -I$(SRC_PATH)/bsd-user/$(TARGET_ARCH)
 
 obj-y += bsd-user/
-obj-y += gdbstub.o user-exec.o $(oslib-obj-y)
+obj-y += gdbstub.o user-exec.o
 
 endif #CONFIG_BSD_USER
 
@@ -107,6 +111,7 @@ ifdef CONFIG_SOFTMMU
 CONFIG_NO_PCI = $(if $(subst n,,$(CONFIG_PCI)),n,y)
 CONFIG_NO_KVM = $(if $(subst n,,$(CONFIG_KVM)),n,y)
 CONFIG_NO_XEN = $(if $(subst n,,$(CONFIG_XEN)),n,y)
+CONFIG_NO_HECA = $(if $(subst n,,$(CONFIG_HECA)),n,y)
 CONFIG_NO_GET_MEMORY_MAPPING = $(if $(subst n,,$(CONFIG_HAVE_GET_MEMORY_MAPPING)),n,y)
 CONFIG_NO_CORE_DUMP = $(if $(subst n,,$(CONFIG_HAVE_CORE_DUMP)),n,y)
 
@@ -121,14 +126,13 @@ obj-$(CONFIG_NO_GET_MEMORY_MAPPING) += memory_mapping-stub.o
 obj-$(CONFIG_NO_CORE_DUMP) += dump-stub.o
 LIBS+=-lz
 
-QEMU_CFLAGS += $(VNC_TLS_CFLAGS)
-QEMU_CFLAGS += $(VNC_SASL_CFLAGS)
-QEMU_CFLAGS += $(VNC_JPEG_CFLAGS)
-QEMU_CFLAGS += $(VNC_PNG_CFLAGS)
-
 # xen support
 obj-$(CONFIG_XEN) += xen-all.o xen-mapcache.o
 obj-$(CONFIG_NO_XEN) += xen-stub.o
+
+# heca support
+obj-$(CONFIG_HECA) += heca-all.o
+obj-$(CONFIG_NO_HECA) += heca-stub.o
 
 # Hardware support
 ifeq ($(TARGET_ARCH), sparc64)
@@ -143,31 +147,25 @@ GENERATED_HEADERS += hmp-commands.h qmp-commands-old.h
 
 endif # CONFIG_SOFTMMU
 
+# Workaround for http://gcc.gnu.org/PR55489, see configure.
+%/translate.o: QEMU_CFLAGS += $(TRANSLATE_OPT_CFLAGS)
+
 nested-vars += obj-y
 
 # This resolves all nested paths, so it must come last
 include $(SRC_PATH)/Makefile.objs
 
 all-obj-y = $(obj-y)
-all-obj-y += $(addprefix ../, $(universal-obj-y))
-
-ifdef CONFIG_SOFTMMU
 all-obj-y += $(addprefix ../, $(common-obj-y))
-all-obj-y += $(addprefix ../libdis/, $(libdis-y))
-all-obj-y += $(addprefix ../, $(trace-obj-y))
-else
-all-obj-y += $(addprefix ../libuser/, $(user-obj-y))
-all-obj-y += $(addprefix ../libdis-user/, $(libdis-y))
-endif #CONFIG_LINUX_USER
 
 ifdef QEMU_PROGW
 # The linker builds a windows executable. Make also a console executable.
-$(QEMU_PROGW): $(all-obj-y)
+$(QEMU_PROGW): $(all-obj-y) ../libqemuutil.a ../libqemustub.a
 	$(call LINK,$^)
 $(QEMU_PROG): $(QEMU_PROGW)
 	$(call quiet-command,$(OBJCOPY) --subsystem console $(QEMU_PROGW) $(QEMU_PROG),"  GEN   $(TARGET_DIR)$(QEMU_PROG)")
 else
-$(QEMU_PROG): $(all-obj-y)
+$(QEMU_PROG): $(all-obj-y) ../libqemuutil.a ../libqemustub.a
 	$(call LINK,$^)
 endif
 

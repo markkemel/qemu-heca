@@ -18,7 +18,7 @@
  */
 
 #include "cpu.h"
-#include "disas.h"
+#include "disas/disas.h"
 #include "helper.h"
 #include "tcg-op.h"
 
@@ -53,7 +53,7 @@ static TCGv cpu_deba;
 static TCGv cpu_bp[4];
 static TCGv cpu_wp[4];
 
-#include "gen-icount.h"
+#include "exec/gen-icount.h"
 
 enum {
     OP_FMT_RI,
@@ -1018,7 +1018,7 @@ static void gen_intermediate_code_internal(CPULM32State *env,
     dc->env = env;
     dc->tb = tb;
 
-    gen_opc_end = gen_opc_buf + OPC_MAX_SIZE;
+    gen_opc_end = tcg_ctx.gen_opc_buf + OPC_MAX_SIZE;
 
     dc->is_jmp = DISAS_NEXT;
     dc->pc = pc_start;
@@ -1047,16 +1047,16 @@ static void gen_intermediate_code_internal(CPULM32State *env,
         check_breakpoint(env, dc);
 
         if (search_pc) {
-            j = gen_opc_ptr - gen_opc_buf;
+            j = tcg_ctx.gen_opc_ptr - tcg_ctx.gen_opc_buf;
             if (lj < j) {
                 lj++;
                 while (lj < j) {
-                    gen_opc_instr_start[lj++] = 0;
+                    tcg_ctx.gen_opc_instr_start[lj++] = 0;
                 }
             }
-            gen_opc_pc[lj] = dc->pc;
-            gen_opc_instr_start[lj] = 1;
-            gen_opc_icount[lj] = num_insns;
+            tcg_ctx.gen_opc_pc[lj] = dc->pc;
+            tcg_ctx.gen_opc_instr_start[lj] = 1;
+            tcg_ctx.gen_opc_icount[lj] = num_insns;
         }
 
         /* Pretty disas.  */
@@ -1071,7 +1071,7 @@ static void gen_intermediate_code_internal(CPULM32State *env,
         num_insns++;
 
     } while (!dc->is_jmp
-         && gen_opc_ptr < gen_opc_end
+         && tcg_ctx.gen_opc_ptr < gen_opc_end
          && !env->singlestep_enabled
          && !singlestep
          && (dc->pc < next_page_start)
@@ -1105,12 +1105,12 @@ static void gen_intermediate_code_internal(CPULM32State *env,
     }
 
     gen_icount_end(tb, num_insns);
-    *gen_opc_ptr = INDEX_op_end;
+    *tcg_ctx.gen_opc_ptr = INDEX_op_end;
     if (search_pc) {
-        j = gen_opc_ptr - gen_opc_buf;
+        j = tcg_ctx.gen_opc_ptr - tcg_ctx.gen_opc_buf;
         lj++;
         while (lj <= j) {
-            gen_opc_instr_start[lj++] = 0;
+            tcg_ctx.gen_opc_instr_start[lj++] = 0;
         }
     } else {
         tb->size = dc->pc - pc_start;
@@ -1120,9 +1120,10 @@ static void gen_intermediate_code_internal(CPULM32State *env,
 #ifdef DEBUG_DISAS
     if (qemu_loglevel_mask(CPU_LOG_TB_IN_ASM)) {
         qemu_log("\n");
-        log_target_disas(pc_start, dc->pc - pc_start, 0);
+        log_target_disas(env, pc_start, dc->pc - pc_start, 0);
         qemu_log("\nisize=%d osize=%td\n",
-            dc->pc - pc_start, gen_opc_ptr - gen_opc_buf);
+            dc->pc - pc_start, tcg_ctx.gen_opc_ptr -
+            tcg_ctx.gen_opc_buf);
     }
 #endif
 }
@@ -1171,7 +1172,7 @@ void cpu_dump_state(CPULM32State *env, FILE *f, fprintf_function cpu_fprintf,
 
 void restore_state_to_opc(CPULM32State *env, TranslationBlock *tb, int pc_pos)
 {
-    env->pc = gen_opc_pc[pc_pos];
+    env->pc = tcg_ctx.gen_opc_pc[pc_pos];
 }
 
 void lm32_translate_init(void)

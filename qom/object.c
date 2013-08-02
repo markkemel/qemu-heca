@@ -10,19 +10,20 @@
  * See the COPYING file in the top-level directory.
  */
 
-#include "qemu/object.h"
+#include "qom/object.h"
 #include "qemu-common.h"
-#include "qapi/qapi-visit-core.h"
+#include "qapi/visitor.h"
 #include "qapi/string-input-visitor.h"
 #include "qapi/string-output-visitor.h"
+#include "qapi/qmp/qerror.h"
 
 /* TODO: replace QObject with a simpler visitor to avoid a dependency
  * of the QOM core on QObject?  */
-#include "qemu/qom-qobject.h"
-#include "qobject.h"
-#include "qbool.h"
-#include "qint.h"
-#include "qstring.h"
+#include "qom/qom-qobject.h"
+#include "qapi/qmp/qobject.h"
+#include "qapi/qmp/qbool.h"
+#include "qapi/qmp/qint.h"
+#include "qapi/qmp/qstring.h"
 
 #define MAX_INTERFACES 32
 
@@ -307,6 +308,7 @@ void object_initialize_with_type(void *data, TypeImpl *type)
 
     memset(obj, 0, type->instance_size);
     obj->class = type->class;
+    object_ref(obj);
     QTAILQ_INIT(&obj->properties);
     object_init_with_type(obj, type);
 }
@@ -359,9 +361,14 @@ static void object_property_del_child(Object *obj, Object *child, Error **errp)
 
 void object_unparent(Object *obj)
 {
+    object_ref(obj);
     if (obj->parent) {
         object_property_del_child(obj->parent, obj, NULL);
     }
+    if (obj->class->unparent) {
+        (obj->class->unparent)(obj);
+    }
+    object_unref(obj);
 }
 
 static void object_deinit(Object *obj, TypeImpl *type)
@@ -375,7 +382,7 @@ static void object_deinit(Object *obj, TypeImpl *type)
     }
 }
 
-void object_finalize(void *data)
+static void object_finalize(void *data)
 {
     Object *obj = data;
     TypeImpl *ti = obj->class->type;
@@ -384,6 +391,9 @@ void object_finalize(void *data)
     object_property_del_all(obj);
 
     g_assert(obj->ref == 0);
+    if (obj->free) {
+        obj->free(obj);
+    }
 }
 
 Object *object_new_with_type(Type type)
@@ -395,7 +405,7 @@ Object *object_new_with_type(Type type)
 
     obj = g_malloc(type->instance_size);
     object_initialize_with_type(obj, type);
-    object_ref(obj);
+    obj->free = g_free;
 
     return obj;
 }
@@ -407,17 +417,9 @@ Object *object_new(const char *typename)
     return object_new_with_type(ti);
 }
 
-void object_delete(Object *obj)
-{
-    object_unparent(obj);
-    g_assert(obj->ref == 1);
-    object_unref(obj);
-    g_free(obj);
-}
-
 Object *object_dynamic_cast(Object *obj, const char *typename)
 {
-    if (object_class_dynamic_cast(object_get_class(obj), typename)) {
+    if (obj && object_class_dynamic_cast(object_get_class(obj), typename)) {
         return obj;
     }
 
@@ -430,7 +432,7 @@ Object *object_dynamic_cast_assert(Object *obj, const char *typename)
 
     inst = object_dynamic_cast(obj, typename);
 
-    if (!inst) {
+    if (!inst && obj) {
         fprintf(stderr, "Object %p is not an instance of type %s\n",
                 obj, typename);
         abort();
@@ -492,6 +494,11 @@ const char *object_get_typename(Object *obj)
 ObjectClass *object_get_class(Object *obj)
 {
     return obj->class;
+}
+
+bool object_class_is_abstract(ObjectClass *klass)
+{
+    return klass->type->abstract;
 }
 
 const char *object_class_get_name(ObjectClass *klass)
@@ -1010,7 +1017,7 @@ gchar *object_get_canonical_path(Object *obj)
     return newpath;
 }
 
-Object *object_resolve_path_component(Object *parent, gchar *part)
+Object *object_resolve_path_component(Object *parent, const gchar *part)
 {
     ObjectProperty *prop = object_property_find(parent, part, NULL);
     if (prop == NULL) {
@@ -1180,6 +1187,62 @@ void object_property_add_str(Object *obj, const char *name,
                         get ? property_get_str : NULL,
                         set ? property_set_str : NULL,
                         property_release_str,
+                        prop, errp);
+}
+
+typedef struct BoolProperty
+{
+    bool (*get)(Object *, Error **);
+    void (*set)(Object *, bool, Error **);
+} BoolProperty;
+
+static void property_get_bool(Object *obj, Visitor *v, void *opaque,
+                              const char *name, Error **errp)
+{
+    BoolProperty *prop = opaque;
+    bool value;
+
+    value = prop->get(obj, errp);
+    visit_type_bool(v, &value, name, errp);
+}
+
+static void property_set_bool(Object *obj, Visitor *v, void *opaque,
+                              const char *name, Error **errp)
+{
+    BoolProperty *prop = opaque;
+    bool value;
+    Error *local_err = NULL;
+
+    visit_type_bool(v, &value, name, &local_err);
+    if (local_err) {
+        error_propagate(errp, local_err);
+        return;
+    }
+
+    prop->set(obj, value, errp);
+}
+
+static void property_release_bool(Object *obj, const char *name,
+                                  void *opaque)
+{
+    BoolProperty *prop = opaque;
+    g_free(prop);
+}
+
+void object_property_add_bool(Object *obj, const char *name,
+                              bool (*get)(Object *, Error **),
+                              void (*set)(Object *, bool, Error **),
+                              Error **errp)
+{
+    BoolProperty *prop = g_malloc0(sizeof(*prop));
+
+    prop->get = get;
+    prop->set = set;
+
+    object_property_add(obj, name, "bool",
+                        get ? property_get_bool : NULL,
+                        set ? property_set_bool : NULL,
+                        property_release_bool,
                         prop, errp);
 }
 
