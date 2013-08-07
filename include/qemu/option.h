@@ -48,7 +48,7 @@ typedef struct QEMUOptionParameter {
     const char *help;
 } QEMUOptionParameter;
 
-
+uint64_t parse_size_string (const char *value);
 const char *get_opt_name(char *buf, int buf_size, const char *p, char delim);
 const char *get_opt_value(char *buf, int buf_size, const char *p);
 int get_next_param_value(char *buf, int buf_size,

@@ -194,7 +194,7 @@ void parse_heca_master_commandline(const char* optarg)
         // get memory size
         q = get_opt_name(l_buf, sizeof(l_buf), q, ':');
         q++;
-        next_mr->sz = strtoull(l_buf, NULL, 10);
+        next_mr->sz = parse_size_string(l_buf);
         DPRINTF("mr sz: %lu\n", next_mr->sz);
 
         // check for correct memory size

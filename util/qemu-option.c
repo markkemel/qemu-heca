@@ -203,6 +203,7 @@ static void parse_option_number(const char *name, const char *value,
     }
 }
 
+
 static void parse_option_size(const char *name, const char *value,
                               uint64_t *ret, Error **errp)
 {
@@ -240,6 +241,19 @@ static void parse_option_size(const char *name, const char *value,
     } else {
         error_set(errp, QERR_INVALID_PARAMETER_VALUE, name, "a size");
     }
+}
+
+uint64_t parse_size_string(const char *value)
+{
+    Error *local_err = NULL;
+    Error **errp = &local_err;
+    uint64_t mr_size = 0;
+
+    parse_option_size("Memory", value, &mr_size, errp);
+
+    if(local_err)
+        error_free(local_err);
+    return mr_size;
 }
 
 /*
