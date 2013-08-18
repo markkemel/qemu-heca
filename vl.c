@@ -492,6 +492,77 @@ static QemuOptsList qemu_object_opts = {
     },
 };
 
+static QemuOptsList qemu_heca_opts = {
+    .name = "heca",
+    .head = QTAILQ_HEAD_INITIALIZER(qemu_heca_opts.head),
+    .desc = {
+        {
+            .name = "hspaceid",
+            .type = QEMU_OPT_NUMBER,
+            .help = "heca_space id",
+        },{
+            .name = "mode",
+            .type = QEMU_OPT_STRING,
+            .help = "heca mode",
+        },{
+            .name = "hprocid",
+            .type = QEMU_OPT_NUMBER,
+            .help = "heca_process id, available only if mode=client",
+        },{
+            .name = "masterip",
+            .type = QEMU_OPT_STRING,
+            .help = "IP address of the master machine, available only if mode=client",
+        },{
+            .name = "port",
+            .type = QEMU_OPT_NUMBER,
+            .help = "port on the master machine to connect to. Option available only if client mode is selected",
+        },
+        { /* End of the list */ }
+    },
+};
+
+static QemuOptsList qemu_hecaproc_opts = {
+    .name = "hecaproc",
+    .head = QTAILQ_HEAD_INITIALIZER(qemu_heca_opts.head),
+    .desc = {
+        {
+            .name = "hprocid",
+            .type = QEMU_OPT_NUMBER,
+            .help = "heca_process id",
+        },{
+            .name = "ip",
+            .type = QEMU_OPT_STRING,
+            .help = "heca_process IP address",
+        },{
+            .name = "port",
+            .type = QEMU_OPT_NUMBER,
+            .help = "heca_process port",
+        },
+        { /* End of the list */ }
+    },
+};
+
+static QemuOptsList qemu_hecamr_opts = {
+    .name = "hecamr",
+    .head = QTAILQ_HEAD_INITIALIZER(qemu_heca_opts.head),
+    .desc = {
+        {
+            .name = "start",
+            .type = QEMU_OPT_NUMBER,
+            .help = "heca memory region starting point",
+        },{
+            .name = "size",
+            .type = QEMU_OPT_SIZE,
+            .help = "heca memory region size",
+        },{
+            .name = "hprocid",
+            .type = QEMU_OPT_NUMBER,
+            .help = "heca_process id for this memory region",
+        },
+        { /* End of the list */ }
+    },
+};
+
 const char *qemu_get_vm_name(void)
 {
     return qemu_name;
@@ -2861,6 +2932,9 @@ int main(int argc, char **argv, char **envp)
     qemu_add_opts(&qemu_sandbox_opts);
     qemu_add_opts(&qemu_add_fd_opts);
     qemu_add_opts(&qemu_object_opts);
+    qemu_add_opts(&qemu_heca_opts);
+    qemu_add_opts(&qemu_hecaproc_opts);
+    qemu_add_opts(&qemu_hecamr_opts);
 
     runstate_init();
 
@@ -3696,6 +3770,14 @@ int main(int argc, char **argv, char **envp)
             case QEMU_OPTION_incoming:
                 incoming = optarg;
                 runstate_set(RUN_STATE_INMIGRATE);
+                break;
+            case QEMU_OPTION_heca:
+                opts = qemu_opts_parse(qemu_find_opts("heca"), optarg, 0);
+                heca_cmd_init(opts);
+                break;
+            case QEMU_OPTION_hecaproc:
+                break;
+            case QEMU_OPTION_hecamr:
                 break;
             case QEMU_OPTION_heca_master:
                 heca_master_cmdline_init(optarg);

@@ -54,6 +54,9 @@ typedef struct Heca {
     struct sockaddr_in master_addr;
 } Heca;
 
+GSList* hproc_list = NULL;
+GSList* mr_list = NULL;
+
 Heca heca;
 
 bool heca_is_master(void)
@@ -93,6 +96,52 @@ static uint32_t get_param_int(const char *name, const char *optarg)
         exit(1);
     }
     return result;
+}
+
+void heca_cmd_master_init(QemuOpts *opts)
+{
+}
+
+void heca_cmd_client_init(QemuOpts *opts)
+{
+    char ip[15];
+    int port;
+
+    heca.dsm_id = qemu_opt_get_number(opts, "hspaceid", -1);
+    heca.local_svm_id = qemu_opt_get_number(opts, "hprocid", -1);
+    port = qemu_opt_get_number(opts, "port", -1);
+    strcpy(ip, qemu_opt_get(opts, "masterip"));
+    bzero((char*) &heca.master_addr, sizeof(heca.master_addr));
+    heca.master_addr.sin_family = AF_INET;
+    heca.master_addr.sin_port = htons(port);
+    heca.master_addr.sin_addr.s_addr = inet_addr(ip);
+
+    DPRINTF("hspaceid = %d\n", heca.dsm_id);
+    DPRINTF("hprocid = %d\n", heca.local_svm_id);
+    DPRINTF("ip : %s\n",ip);
+    DPRINTF("tcp port: %d\n", port);
+}
+
+void heca_cmd_init(QemuOpts *opts)
+{
+    char mode[10];
+    
+    heca.is_enabled = true;
+    strcpy(mode, qemu_opt_get(opts, "mode"));
+    if (strcmp(mode, "master") == 0) {
+        heca.is_master = true;
+        heca_gdb_stub();
+        heca_cmd_master_init(opts);
+    }
+    else if (strcmp(mode, "client") == 0) {
+        heca.is_master = false;
+        heca_gdb_stub();
+        heca_cmd_client_init(opts);
+    }
+    else {
+        fprintf(stderr, "[HECA] Mode should have values master|client");
+        exit(1);
+    }
 }
 
 /* setup data for heca_init to setup master and slave nodes */
