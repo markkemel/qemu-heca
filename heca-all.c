@@ -52,9 +52,6 @@ typedef struct Heca {
     struct sockaddr_in master_addr;
 } Heca;
 
-GSList* hproc_list = NULL;
-GSList* mr_list = NULL;
-
 Heca heca;
 
 bool heca_is_master(void)
@@ -80,7 +77,7 @@ void hecamr_cmd_add(QemuOpts *opts)
     struct hecaioc_hmr *newhmr = g_malloc0(sizeof(struct hecaioc_hmr));
 
     newhmr->hspace_id = heca.hspace_id;
-    newhmr->hmr_id = heca.mr_count;
+    newhmr->hmr_id = heca.mr_count + 1;
     newhmr->addr = (void*) qemu_opt_get_number(opts, "start", -1);
     newhmr->sz = qemu_opt_get_size(opts, "size", -1);
     strcpy(hprocs, qemu_opt_get(opts, "hprocids"));
