@@ -494,6 +494,7 @@ static QemuOptsList qemu_object_opts = {
 
 static QemuOptsList qemu_heca_opts = {
     .name = "heca",
+    .implied_opt_name = "mode",
     .head = QTAILQ_HEAD_INITIALIZER(qemu_heca_opts.head),
     .desc = {
         {
@@ -515,7 +516,7 @@ static QemuOptsList qemu_heca_opts = {
         },{
             .name = "port",
             .type = QEMU_OPT_NUMBER,
-            .help = "port on the master machine to connect to. Option available only if client mode is selected",
+            .help = "Master machine port. Available only if client mode is selected",
         },
         { /* End of the list */ }
     },
@@ -523,6 +524,7 @@ static QemuOptsList qemu_heca_opts = {
 
 static QemuOptsList qemu_hecaproc_opts = {
     .name = "hecaproc",
+    .implied_opt_name = "hprocid",
     .head = QTAILQ_HEAD_INITIALIZER(qemu_heca_opts.head),
     .desc = {
         {
@@ -544,6 +546,7 @@ static QemuOptsList qemu_hecaproc_opts = {
 
 static QemuOptsList qemu_hecamr_opts = {
     .name = "hecamr",
+    .implied_opt_name = "size",
     .head = QTAILQ_HEAD_INITIALIZER(qemu_heca_opts.head),
     .desc = {
         {

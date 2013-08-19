@@ -23,6 +23,7 @@
 #include "migration/block.h"
 #include "qemu/thread.h"
 #include "qmp-commands.h"
+#include "heca.h"
 
 //#define DEBUG_MIGRATION
 
