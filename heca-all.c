@@ -33,8 +33,6 @@ void *heca_get_system_ram_ptr(void);
 uint64_t heca_get_system_ram_size(void);
 void heca_start_mig_timer(uint64_t timeout);
 int heca_unmap_memory(void *addr, size_t size);
-void parse_heca_master_commandline(const char* optarg);
-void parse_heca_client_commandline(const char* optarg);
 
 typedef struct Heca {
     bool is_enabled;
@@ -73,33 +71,64 @@ static void print_data_structures(void);
 static const char* ip_from_uri(const char* uri);
 static void heca_config(void);
 
-/* static helper functions for parsing commandline */
-static void get_param(char *target, const char *name, int size, 
-    const char *optarg)
+void hecamr_cmd_add(QemuOpts *opts)
 {
-    if (get_param_value(target, size, name, optarg) == 0) {
-        fprintf(stderr, "Could not get parameter value");
-        exit(1);
+    char hprocs[MAX_HPROC_IDS*10];
+    char *hpr;
+    int mrstrsz = sizeof(struct hecaioc_hmr);
+    int i = 0;
+    struct hecaioc_hmr *newhmr = g_malloc0(sizeof(struct hecaioc_hmr));
+
+    newhmr->hspace_id = heca.hspace_id;
+    newhmr->hmr_id = heca.mr_count;
+    newhmr->addr = (void*) qemu_opt_get_number(opts, "start", -1);
+    newhmr->sz = qemu_opt_get_size(opts, "size", -1);
+    strcpy(hprocs, qemu_opt_get(opts, "hprocids"));
+    memset(newhmr->hproc_ids, 0, sizeof(newhmr->hproc_ids[0]) * MAX_HPROC_IDS);
+    hpr = strtok(hprocs, ":");
+    while (hpr != NULL) {
+        if (i == MAX_HPROC_IDS) {
+            fprintf(stderr, "HECA: Too many hprocs for memory region\n");
+            exit(1);
+        }
+        newhmr->hproc_ids[i] = atoi(hpr);
+        i++;
+        hpr = strtok(NULL, ":");
     }
+    i = heca.mr_count;
+    heca.mr_array = realloc(heca.mr_array, mrstrsz*(i+1));
+    memcpy(&heca.mr_array[i], newhmr, mrstrsz);
+    heca.mr_count++;
+
+    DPRINTF("mr id: %d\n", newhmr->hmr_id);
+    DPRINTF("mr addr: %lld\n", (long long int)newhmr->addr);
+    DPRINTF("mr sz: %lu\n", newhmr->sz);
+    DPRINTF("mr hprocids: %s\n", hprocs);
+    g_free(newhmr);
 }
 
-static uint32_t get_param_int(const char *name, const char *optarg)
+void hecaproc_cmd_add(QemuOpts *opts)
 {
-    char target[128];
-    uint32_t result = 0;
+    char ip[15];
+    int port, i;
+    int hpstrsz = sizeof(struct hecaioc_hproc);
+    struct hecaioc_hproc *newhproc = g_malloc0(sizeof(struct hecaioc_hproc));
 
-    get_param(target, name, 128, optarg);
-    result = strtoull(target, NULL, 10); 
-    if (result <= 0 || (result & 0xFFFF) != result) {
-        printf("error?\n");
-        fprintf(stderr, "Could not get parameter value");
-        exit(1);
-    }
-    return result;
-}
+    newhproc->hspace_id = heca.hspace_id;
+    newhproc->hproc_id = qemu_opt_get_number(opts, "hprocid", -1);
+    strcpy(ip, qemu_opt_get(opts, "ip"));
+    port = qemu_opt_get_number(opts, "port", -1);
+    newhproc->remote.sin_addr.s_addr = inet_addr(ip);
+    newhproc->remote.sin_port = htons(port);
+    i = heca.hproc_count;
+    heca.hproc_array = realloc(heca.hproc_array, hpstrsz*(i+1));
+    memcpy(&heca.hproc_array[i], newhproc, hpstrsz);
+    heca.hproc_count++;
 
-void heca_cmd_master_init(QemuOpts *opts)
-{
+    DPRINTF("hproc id is: %d\n", newhproc->hproc_id);
+    DPRINTF("ip is: %s\n", ip);
+    DPRINTF("port is: %d\n", port);
+    g_free(newhproc);
 }
 
 void heca_cmd_client_init(QemuOpts *opts)
@@ -107,8 +136,7 @@ void heca_cmd_client_init(QemuOpts *opts)
     char ip[15];
     int port;
 
-    heca.dsm_id = qemu_opt_get_number(opts, "hspaceid", -1);
-    heca.local_svm_id = qemu_opt_get_number(opts, "hprocid", -1);
+    heca.local_hproc_id = qemu_opt_get_number(opts, "hprocid", -1);
     port = qemu_opt_get_number(opts, "port", -1);
     strcpy(ip, qemu_opt_get(opts, "masterip"));
     bzero((char*) &heca.master_addr, sizeof(heca.master_addr));
@@ -116,8 +144,8 @@ void heca_cmd_client_init(QemuOpts *opts)
     heca.master_addr.sin_port = htons(port);
     heca.master_addr.sin_addr.s_addr = inet_addr(ip);
 
-    DPRINTF("hspaceid = %d\n", heca.dsm_id);
-    DPRINTF("hprocid = %d\n", heca.local_svm_id);
+    DPRINTF("hspaceid = %d\n", heca.hspace_id);
+    DPRINTF("hprocid = %d\n", heca.local_hproc_id);
     DPRINTF("ip : %s\n",ip);
     DPRINTF("tcp port: %d\n", port);
 }
@@ -127,11 +155,12 @@ void heca_cmd_init(QemuOpts *opts)
     char mode[10];
     
     heca.is_enabled = true;
+    heca.hspace_id = qemu_opt_get_number(opts, "hspaceid", -1);
     strcpy(mode, qemu_opt_get(opts, "mode"));
     if (strcmp(mode, "master") == 0) {
         heca.is_master = true;
+        heca.local_hproc_id = 1; /* Always 1 for master */
         heca_gdb_stub();
-        heca_cmd_master_init(opts);
     }
     else if (strcmp(mode, "client") == 0) {
         heca.is_master = false;
@@ -144,198 +173,14 @@ void heca_cmd_init(QemuOpts *opts)
     }
 }
 
-/* setup data for heca_init to setup master and slave nodes */
-void parse_heca_master_commandline(const char* optarg)
-{
-    GSList* hproc_list = NULL;
-    GSList* mr_list = NULL;
-
-    char nodeinfo_option[128];
-
-    /* hspace general info */
-    heca.hspace_id = get_param_int("hspaceid", optarg);
-    DPRINTF("hspace_id = %d\n", heca.hspace_id);
-    heca.local_hproc_id = 1; // always 1 for master
-    DPRINTF("local_hproc_id = %d\n", heca.local_hproc_id);
-
-    /* per-hproc info: id, ip, port */
-    get_param(nodeinfo_option, "vminfo", sizeof(nodeinfo_option), optarg);
-    const char *p = nodeinfo_option;
-    char h_buf[500];
-    char l_buf[500];
-    const char *q;
-    uint32_t i;
-    uint32_t tcp_port;
-
-    while (*p != '\0') {
-        struct hecaioc_hproc *next_hproc = g_malloc0(sizeof(struct hecaioc_hproc));
-        
-        next_hproc->hspace_id = heca.hspace_id;
-
-        p = get_opt_name(h_buf, sizeof(h_buf), p, '#');
-        p++;
-        q = get_opt_name(l_buf, sizeof(l_buf), h_buf, ':');
-        q++;
-
-        next_hproc->hproc_id = strtoull(l_buf, NULL, 10);
-        if ((next_hproc->hproc_id & 0xFFFF) != next_hproc->hproc_id) {
-            fprintf(stderr, "[HECA] Invalid hproc_id: %d\n",
-                    (int)next_hproc->hproc_id);
-            exit(1);
-        }
-        DPRINTF("hproc id is: %d\n", next_hproc->hproc_id);
-
-        // Parse node IP
-        q = get_opt_name(l_buf, sizeof(l_buf), q, ':');
-        q++;
-        next_hproc->remote.sin_addr.s_addr = inet_addr(l_buf);
-        DPRINTF("ip is: %s\n", l_buf);
-
-        // Parse rdma port
-        q = get_opt_name(l_buf, sizeof(l_buf), q, ':');
-        q++;
-        next_hproc->remote.sin_port = htons(strtoull(l_buf, NULL, 10));
-        DPRINTF("port is: %s\n", l_buf);
-
-        // Parse tcp port
-        q = get_opt_name(l_buf, sizeof(l_buf), q, ':');
-        q++;
-        tcp_port = strtoull(l_buf, NULL, 10);
-        if (tcp_port) /* FIXME: remove tcp_port - not needed */
-            DPRINTF("tcp port is (not passed to libheca): %d\n", tcp_port);
-
-        hproc_list = g_slist_append(hproc_list, next_hproc);
-        heca.hproc_count++;
-    }
-
-    // Now, we setup the hproc_array with the hprocs created above 
-    heca.hproc_array = calloc(heca.hproc_count, sizeof(struct hecaioc_hproc));
-    struct hecaioc_hproc *hproc_ptr;
-    for (i = 0; i < heca.hproc_count; i++) {
-        hproc_ptr = g_slist_nth_data(hproc_list, i);
-        memcpy(&heca.hproc_array[i], hproc_ptr, sizeof(struct hecaioc_hproc));
-    }
-    g_slist_free(hproc_list);
-
-    /* mr info: sizes, owners */
-    get_param(nodeinfo_option, "mr", sizeof(nodeinfo_option), optarg);
-    p = nodeinfo_option;
-
-    while (*p != '\0') {
-        struct hecaioc_hmr *next_mr = g_malloc0(sizeof(struct hecaioc_hmr));
-
-        p = get_opt_name(h_buf, sizeof(h_buf), p, '#');
-        p++;
-        q = h_buf;
-
-        // Set hspace id
-        next_mr->hspace_id = heca.hspace_id;
-
-        // TODO: code to set id
-        //next_mr->id = 1;
-
-        // get memory region id
-        q = get_opt_name(l_buf, sizeof(l_buf), q, ':');
-        q++;
-        next_mr->hmr_id = strtoull(l_buf, NULL, 10);
-        DPRINTF("mr id: %lld\n", (long long int)next_mr->addr);
-
-        // get memory size
-        q = get_opt_name(l_buf, sizeof(l_buf), q, ':');
-        q++;
-        next_mr->sz = parse_size_string(l_buf);
-        DPRINTF("mr sz: %lu\n", next_mr->sz);
-
-        // check for correct memory size
-        if (next_mr->sz == 0 || next_mr->sz % TARGET_PAGE_SIZE != 0) {
-            fprintf(stderr, "HECA: Wrong mem size. \n \
-                It has to be a multiple of %d\n", (int)TARGET_PAGE_SIZE);
-            exit(1);
-        }
-
-        // get all hprocs for this memory region
-        memset(next_mr->hproc_ids, 0, sizeof(next_mr->hproc_ids[0]) * MAX_HPROC_IDS);
-
-        for (i = 0; *q != '\0'; i++) {
-            if (i == MAX_HPROC_IDS) {
-                fprintf(stderr, "HECA: Too many hprocs for memory region\n");
-                exit(1);
-            }
-
-            q = get_opt_name(l_buf, sizeof(l_buf), q, ':');
-            if (strlen(q))
-                q++;
-            next_mr->hproc_ids[i] = strtoull(l_buf, NULL, 10);
-            DPRINTF("adding mr owner: %d\n", next_mr->hproc_ids[i]);
-        }
-
-        // Set array of hprocs for each unmap region
-        mr_list = g_slist_append(mr_list, next_mr);
-        heca.mr_count++;
-    }
-
-    // Now, we setup the mr_array with the unmap_data structs created above
-    heca.mr_array = calloc(heca.mr_count, sizeof(struct hecaioc_hmr));
-    for (i = 0; i < heca.mr_count; i++) {
-        memcpy(&heca.mr_array[i], g_slist_nth_data(mr_list, i),
-                sizeof(struct hecaioc_hmr));
-    }
-
-    g_slist_free(mr_list);
-}
-
-void parse_heca_client_commandline(const char* optarg) 
-{
-    printf("parse_heca_client_commandline\n");
-    heca.hspace_id = get_param_int("hspaceid", optarg);
-    printf("hspace_id = %d\n", heca.hspace_id);
-
-    DPRINTF("hspace_id = %d\n", heca.hspace_id);
-
-    heca.local_hproc_id = get_param_int("vmid", optarg);
-    DPRINTF("local_hproc_id = %d\n", heca.local_hproc_id);
-    printf("local_hproc_id= %d\n", heca.local_hproc_id);
-
-    char masterinfo_option[128];
-    get_param(masterinfo_option, "master", sizeof(masterinfo_option), optarg);
-
-    char l_buf[200];
-    const char *q = masterinfo_option;
- 
-    q = get_opt_name(l_buf, sizeof(l_buf), q, ':');
-    q++;
-    char ip[100];
-    strcpy(ip, l_buf);
-    DPRINTF("ip is : %s\n",ip);
-
-    // Parse rdma port
-    q = get_opt_name(l_buf, sizeof(l_buf), q, ':');
-    q++;
-    int port = strtoull(l_buf, NULL, 10);
-    if (port) /* FIXME: port not needed */
-        DPRINTF("port is : %d\n",port);
-
-    // Parse tcp port
-    q = get_opt_name(l_buf, sizeof(l_buf), q, ':');
-    q++;
-    int tcp_port = strtoull(l_buf, NULL, 10);
-    DPRINTF("tcp port: %d\n", tcp_port);
-
-    bzero((char*) &heca.master_addr, sizeof(heca.master_addr));
-    heca.master_addr.sin_family = AF_INET;
-    heca.master_addr.sin_port = htons(tcp_port);
-    heca.master_addr.sin_addr.s_addr = inet_addr(ip);
-    printf("leaving...\n");
-}
-
 void heca_migrate_dest_init(const char* dest_ip, const char* source_ip)
 {
     heca_config();
     heca.is_enabled = true;
-    heca.hspace_id = 1;          // only need 1 for live migration (LM)
-    heca.local_hproc_id = 1;    // master node is 1
-    heca.hproc_count = 2;       // only master and client required for LM
-    heca.mr_count = 1;        // only need 1 memory region for LM
+    heca.hspace_id = 1;         /* only need 1 for live migration (LM) */
+    heca.local_hproc_id = 1;    /* master node is 1 */
+    heca.hproc_count = 2;       /* only master and client required for LM */
+    heca.mr_count = 1;          /* only need 1 memory region for LM */
 
     struct hecaioc_hproc dst_hproc = {
         .hspace_id = 1,
@@ -374,12 +219,12 @@ void heca_migrate_dest_init(const char* dest_ip, const char* source_ip)
     }
     uint64_t ram_sz = heca_get_system_ram_size();
 
-    heca.mr_array[0].addr = ram_ptr; // only one memory region required for LM
+    heca.mr_array[0].addr = ram_ptr; /*only one memory region required for LM*/
     heca.mr_array[0].sz = ram_sz;
 
     DPRINTF("initializing heca master\n");
 
-    //print_data_structures();
+    /* print_data_structures(); */
     heca.rdma_fd = heca_master_open(heca.hproc_count, 
             heca.hproc_array, heca.mr_count, heca.mr_array);
 
@@ -389,7 +234,7 @@ void heca_migrate_dest_init(const char* dest_ip, const char* source_ip)
     }
 
     DPRINTF("Heca master node is ready..\n");
-    //hspace_cleanup(fd); 
+    /* hspace_cleanup(fd); */
 }
 
 void heca_migrate_src_init(const char* uri, int precopy_time)
@@ -397,9 +242,9 @@ void heca_migrate_src_init(const char* uri, int precopy_time)
     heca_config();
 
     heca.is_enabled = true;
-    heca.hspace_id = 1;         // only need 1 for live migration (LM)
-    heca.local_hproc_id = 2;   // client node
-    heca.hproc_count = 2;      // only master and client required for LM
+    heca.hspace_id = 1;         /* only need 1 for live migration (LM) */
+    heca.local_hproc_id = 2;    /* client node */
+    heca.hproc_count = 2;       /* only master and client required for LM */
 
     const char* dest_ip = ip_from_uri(uri);
     bzero((char*) &heca.master_addr, sizeof(heca.master_addr));
@@ -427,7 +272,7 @@ void heca_migrate_src_init(const char* uri, int precopy_time)
     }
 
     DPRINTF("Heca client node is ready..\n");
-    //hspace_cleanup(fd); 
+    /* hspace_cleanup(fd); */
 }
 
 static const char* ip_from_uri(const char* uri) 
@@ -436,36 +281,38 @@ static const char* ip_from_uri(const char* uri)
 
     char_array_uri[sizeof(char_array_uri) - 1] = 0;
     strncpy(char_array_uri, uri, sizeof(char_array_uri) - 1);
-
-    char* ip = strtok(char_array_uri, ":"); // ip points to uri protocol, e.g. 'tcp'
-    ip = strtok(NULL, ":");                 // ip now points to ip address
-
+    
+    /* ip points to uri protocol, e.g. 'tcp' */
+    char* ip = strtok(char_array_uri, ":");
+    /* ip now points to ip address */
+    ip = strtok(NULL, ":");
     return (const char*) ip;
 }
 
 static void heca_config(void)
 {
-    // read file .heca_config. Ideally, all configuration would be contained here.
+    /* read file .heca_config. Ideally, all configuration 
+       would be contained here. */
     wordexp_t result;
     wordexp("~/.heca_config", &result, 0);
     const char* heca_conf_path = result.we_wordv[0];
 
     FILE *conf_file = fopen(heca_conf_path, "r");
     if (conf_file == NULL) {
-        // use default port values
+        /* use default port values */
         heca.rdma_port = 4444;
         heca.tcp_sync_port = 4445;
     }
-
-    if (conf_file && fscanf(conf_file, "RDMA_PORT=%d", &heca.rdma_port) < 1) {
-        fprintf(stderr, "Couldn't read RDMA_PORT - defaulting to 4444\n");
-        heca.rdma_port = 4444;
-    };
-
-    if (conf_file && fscanf(conf_file, "TCP_SYNC_PORT=%d", &heca.tcp_sync_port) < 1) {
-        fprintf(stderr, "Couldn't read TCP_SYNC_PORT defaulting to 4445\n");
-        heca.tcp_sync_port = 4445;
-    };
+    else {
+        if (fscanf(conf_file, "RDMA_PORT=%d", &heca.rdma_port) < 1) {
+            fprintf(stderr, "Couldn't read RDMA_PORT - defaulting to 4444\n");
+            heca.rdma_port = 4444;
+        }
+        if (fscanf(conf_file, "TCP_SYNC_PORT=%d", &heca.tcp_sync_port) < 1) {
+            fprintf(stderr, "Couldn't read TCP_SYNC_PORT defaulting to 4445\n");
+            heca.tcp_sync_port = 4445;
+        }
+    }
 }
 
 static inline int heca_assign_master_mem(void *ram_ptr, uint64_t ram_size)
@@ -485,8 +332,8 @@ static inline int heca_assign_master_mem(void *ram_ptr, uint64_t ram_size)
 
 static void print_data_structures(void)
 {
-    int i;
-    int j;
+    int i, j;
+
     printf("hproc_array:\n");
     for (i = 0; i < heca.hproc_count; i++) {
         printf("{ .hspace_id = %d, .hproc_id = %d, .ip = %s, .port = %d}\n", 
@@ -496,12 +343,13 @@ static void print_data_structures(void)
     }
     printf("mr_array:\n");
     for (i = 0; i < heca.mr_count; i++) {
-        printf("{ .hspace_id = %d, .hmr_id = %d, .addr = %ld, .sz = %lld, .flags = %d, .hproc_ids = { ",
+        printf("{ .hspace_id = %d, .hmr_id = %d, .addr = %ld, ", 
             heca.mr_array[i].hspace_id, heca.mr_array[i].hmr_id, 
-            (unsigned long) heca.mr_array[i].addr, 
+            (unsigned long) heca.mr_array[i].addr);
+        printf(".sz = %lld, .flags = %d, .hproc_ids = { ",
             (long long) heca.mr_array[i].sz, heca.mr_array[i].flags);
         j = 0;
-        while(heca.mr_array[i].hproc_ids[j] != 0) {
+        while(heca.mr_array[i].hproc_ids[j] != 0 && j < MAX_HPROC_IDS) {
             printf("%d, ", heca.mr_array[i].hproc_ids[j]);
             j++;
         }
@@ -632,63 +480,38 @@ int heca_unmap_dirty_bitmap(uint8_t *bitmap, uint32_t bitmap_size)
     host_ram = (unsigned long) heca_get_system_ram_ptr();
  
     size_t unmap_size = 0;
-    unsigned long unmap_offset = -1; // -1 is reset value
+    unsigned long unmap_offset = -1; /* -1 is reset value */
     int count = 0;
 
     for (i = 0; i < bitmap_size; i++) {
         if (bitmap[i] & 0x08) { 
-            // page is dirty, flag start of dirty range
+            /* page is dirty, flag start of dirty range */
             count ++;
-
             if (unmap_offset == -1) 
                 unmap_offset = i * TARGET_PAGE_SIZE;
             unmap_size += TARGET_PAGE_SIZE;
-
         } else if (unmap_size > 0) {
-            // end of dirty range
-
+            /* end of dirty range */
             unmap_addr = (void*) (host_ram + unmap_offset);
             ret = heca_unmap_memory(unmap_addr, unmap_size);
             if (ret < 0) {
                 return ret;
             }
-
-            // reset 
+            /* reset */
             unmap_offset = -1;
             unmap_size = 0;
         }
     }
     if (unmap_size > 0) {
-        // Last page was dirty but we have finished iterating over bitmap
+        /* Last page was dirty but we have finished iterating over bitmap */
         unmap_addr = (void*) (host_ram + unmap_offset);
         ret = heca_unmap_memory(unmap_addr, unmap_size);
         if (ret < 0) {
-
             return ret;
         }
     }
     qemu_add_vm_change_state_handler(heca_change_state_handler, NULL);
     return ret;
-}
-
-void heca_master_cmdline_init(const char* optarg)
-{
-    heca.is_enabled = true;
-    heca.is_master = true;
-    heca_gdb_stub();
-    parse_heca_master_commandline(optarg);
-
-    int i;
-    for (i = 0; i < heca.mr_count; i++)
-        heca.mr_array[i].flags |= UD_AUTO_UNMAP;
-}
-
-void heca_client_cmdline_init(const char* optarg)
-{
-    heca.is_enabled = true;
-    heca.is_master = false;
-    heca_gdb_stub();
-    parse_heca_client_commandline(optarg);
 }
 
 void heca_init(void* ram_ptr, uint64_t ram_size)
@@ -700,7 +523,7 @@ void heca_init(void* ram_ptr, uint64_t ram_size)
 
         heca_assign_master_mem(ram_ptr, ram_size);
 
-        // init heca
+        /* init heca */
         heca.rdma_fd = heca_master_open(heca.hproc_count, 
                 heca.hproc_array, heca.mr_count, heca.mr_array);
     } else {
@@ -714,6 +537,5 @@ void heca_init(void* ram_ptr, uint64_t ram_size)
     }
 
     DPRINTF("Heca is ready...\n");
-
 }
 

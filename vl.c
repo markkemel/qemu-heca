@@ -555,9 +555,9 @@ static QemuOptsList qemu_hecamr_opts = {
             .type = QEMU_OPT_SIZE,
             .help = "heca memory region size",
         },{
-            .name = "hprocid",
-            .type = QEMU_OPT_NUMBER,
-            .help = "heca_process id for this memory region",
+            .name = "hprocids",
+            .type = QEMU_OPT_STRING,
+            .help = "heca_process ids for this memory region, divided by :",
         },
         { /* End of the list */ }
     },
@@ -3776,14 +3776,12 @@ int main(int argc, char **argv, char **envp)
                 heca_cmd_init(opts);
                 break;
             case QEMU_OPTION_hecaproc:
+                opts = qemu_opts_parse(qemu_find_opts("hecaproc"), optarg, 0);
+                hecaproc_cmd_add(opts);
                 break;
             case QEMU_OPTION_hecamr:
-                break;
-            case QEMU_OPTION_heca_master:
-                heca_master_cmdline_init(optarg);
-                break;
-            case QEMU_OPTION_heca_client:
-                heca_client_cmdline_init(optarg);
+                opts = qemu_opts_parse(qemu_find_opts("hecamr"), optarg, 0);
+                hecamr_cmd_add(opts);
                 break;
             case QEMU_OPTION_nodefaults:
                 default_serial = 0;
