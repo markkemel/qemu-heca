@@ -29,11 +29,6 @@ int heca_gdb_pause = 1;
     do { } while (0)
 #endif
 
-void *heca_get_system_ram_ptr(void);
-uint64_t heca_get_system_ram_size(void);
-void heca_start_mig_timer(uint64_t timeout);
-int heca_unmap_memory(void *addr, size_t size);
-
 typedef struct Heca {
     bool is_enabled;
     bool is_master;
@@ -54,6 +49,15 @@ typedef struct Heca {
 
 Heca heca;
 
+void *heca_get_system_ram_ptr(void);
+uint64_t heca_get_system_ram_size(void);
+void heca_start_mig_timer(uint64_t timeout);
+int heca_unmap_memory(void *addr, size_t size);
+void heca_cmd_err(const char* msg, int* param);
+static void print_data_structures(void);
+static const char* ip_from_uri(const char* uri);
+static void heca_config(void);
+
 bool heca_is_master(void)
 {
     return heca.is_master;
@@ -64,23 +68,16 @@ bool heca_is_enabled(void)
     return heca.is_enabled;
 }
 
-static void print_data_structures(void);
-static const char* ip_from_uri(const char* uri);
-static void heca_config(void);
-
 void hecamr_cmd_add(QemuOpts *opts)
 {
     char hprocs[MAX_HPROC_IDS*10];
     char *hpr;
     const char* hprocstmp;
-    int mrstrsz = sizeof(struct hecaioc_hmr);
+    int mrstrsz = sizeof(struct hecaioc_hmr), pgsz;
     int i = 0;
 
-    if (!heca.is_master) {
-        fprintf(stderr, "[HECA] -hecamr should follow -heca mode=master\n");
-        exit(1);
-    }
-
+    if (!heca.is_master)
+        heca_cmd_err("-hecamr should follow -heca mode=master", NULL);
     struct hecaioc_hmr *newhmr = g_malloc0(sizeof(struct hecaioc_hmr));
     newhmr->hspace_id = heca.hspace_id;
     newhmr->hmr_id = heca.mr_count + 1;
@@ -88,24 +85,21 @@ void hecamr_cmd_add(QemuOpts *opts)
     newhmr->sz = qemu_opt_get_size(opts, "size", -1);
     hprocstmp = qemu_opt_get(opts, "hprocids");
     if (newhmr->addr == (void*) -1 || newhmr->sz == -1 || !hprocstmp) {
-        fprintf(stderr, "[HECA] start, size and hprocids are mandatory opts\n");
         g_free(newhmr);
-        exit(1);
+        heca_cmd_err("start, size and hprocids are implied for -hecamr", NULL);
     }
     if (newhmr->sz == 0 || newhmr->sz % TARGET_PAGE_SIZE != 0) {
-        fprintf(stderr, "[HECA] Wrong mem size. \nIt has to");
-        fprintf(stderr, "be a multiple of %d\n", (int)TARGET_PAGE_SIZE);
         g_free(newhmr);
-        exit(1);
+        pgsz = TARGET_PAGE_SIZE;
+        heca_cmd_err("Memory size has to be a multiple of: ", &pgsz);
     }
     strcpy(hprocs, hprocstmp);
     memset(newhmr->hproc_ids, 0, sizeof(newhmr->hproc_ids[0]) * MAX_HPROC_IDS);
     hpr = strtok(hprocs, ":");
     while (hpr != NULL) {
         if (i == MAX_HPROC_IDS) {
-            fprintf(stderr, "HECA: Too many hprocs for memory region\n");
             g_free(newhmr);
-            exit(1);
+            heca_cmd_err("Too many hprocs for memory region", NULL);
         }
         newhmr->hproc_ids[i] = atoi(hpr);
         i++;
@@ -126,28 +120,24 @@ void hecamr_cmd_add(QemuOpts *opts)
 void hecaproc_cmd_add(QemuOpts *opts)
 {
     const char* ip;
-    int port, i;
+    int port, tcp_port, i;
     int hpstrsz = sizeof(struct hecaioc_hproc);
 
-    if (!heca.is_master) {
-        fprintf(stderr, "[HECA] -hecaproc should follow -heca mode=master\n");
-        exit(1);
-    }
-
+    if (!heca.is_master)
+        heca_cmd_err("-hecaproc param should follow -heca mode=master", NULL);
     struct hecaioc_hproc *newhproc = g_malloc0(sizeof(struct hecaioc_hproc));
     newhproc->hspace_id = heca.hspace_id;
     newhproc->hproc_id = qemu_opt_get_number(opts, "hprocid", -1);
     ip = qemu_opt_get(opts, "ip");
     port = qemu_opt_get_number(opts, "port", -1);
-    if (port == -1 || newhproc->hproc_id == -1 || !ip) {
-        fprintf(stderr, "[HECA] hprocid, ip and port are mandatory opts\n");
+    tcp_port = qemu_opt_get_number(opts, "tcp_port", -1);
+    if (port == -1 || tcp_port == -1 || newhproc->hproc_id == -1 || !ip) {
         g_free(newhproc);
-        exit(1);
+        heca_cmd_err("hprocid, ip and ports are implied for -hecaproc", NULL);
     }
     if ((newhproc->hproc_id & 0xFFFF) != newhproc->hproc_id) {
-        fprintf(stderr, "[HECA] Invalid hprocid:%d\n", (int)newhproc->hproc_id);
         g_free(newhproc);
-        exit(1);
+        heca_cmd_err("Invalid hprocid for -hproc", NULL);
     }
     newhproc->remote.sin_addr.s_addr = inet_addr(ip);
     newhproc->remote.sin_port = htons(port);
@@ -155,44 +145,40 @@ void hecaproc_cmd_add(QemuOpts *opts)
     heca.hproc_array = realloc(heca.hproc_array, hpstrsz*(i+1));
     memcpy(&heca.hproc_array[i], newhproc, hpstrsz);
     heca.hproc_count++;
-    
     if (newhproc->remote.sin_addr.s_addr == INADDR_NONE) {
-        fprintf(stderr, "[HECA] Invalid IP address\n");
         g_free(newhproc);
-        exit(1);
+        heca_cmd_err("Invalid IP address", NULL);
     }
     DPRINTF("hproc id is: %d\n", newhproc->hproc_id);
     DPRINTF("ip is: %s\n", ip);
-    DPRINTF("port is: %d\n", port);
+    DPRINTF("rdma port is: %d\n", port);
+    DPRINTF("tcp port is: %d\n", tcp_port);
     g_free(newhproc);
 }
 
 void heca_cmd_client_init(QemuOpts *opts)
 {
-    int port;
+    int port, tcp_port;
     const char* ip;
 
     heca.local_hproc_id = qemu_opt_get_number(opts, "hprocid", -1);
     port = qemu_opt_get_number(opts, "port", -1);
+    tcp_port = qemu_opt_get_number(opts, "tcp_port", -1);
     ip = qemu_opt_get(opts, "masterip");
 
-    if (port == -1 || heca.local_hproc_id == -1 || !ip) {
-        fprintf(stderr, "[HECA] hprocid, ip and port are mandatory opts\n");
-        exit(1);
-    }
-
+    if (port == -1 || tcp_port == -1|| heca.local_hproc_id == -1 || !ip)
+        heca_cmd_err("hprocid, ip, ports are implied for heca client", NULL);
     bzero((char*) &heca.master_addr, sizeof(heca.master_addr));
     heca.master_addr.sin_family = AF_INET;
-    heca.master_addr.sin_port = htons(port);
+    heca.master_addr.sin_port = htons(tcp_port);
     heca.master_addr.sin_addr.s_addr = inet_addr(ip);
-    if (heca.master_addr.sin_addr.s_addr == INADDR_NONE) {
-        fprintf(stderr, "[HECA] Invalid IP address\n");
-        exit(1);
-    }
+    if (heca.master_addr.sin_addr.s_addr == INADDR_NONE)
+        heca_cmd_err("Invalid IP address", NULL);
     DPRINTF("hspaceid = %d\n", heca.hspace_id);
     DPRINTF("hprocid = %d\n", heca.local_hproc_id);
     DPRINTF("ip : %s\n",ip);
-    DPRINTF("tcp port: %d\n", port);
+    DPRINTF("rdma port: %d\n", port);
+    DPRINTF("tcp port: %d\n", tcp_port);
 }
 
 void heca_cmd_init(QemuOpts *opts)
@@ -212,15 +198,48 @@ void heca_cmd_init(QemuOpts *opts)
         heca_gdb_stub();
         heca_cmd_client_init(opts);
     }
-    else {
-        fprintf(stderr, "[HECA] Mode should have values master|client\n");
-        exit(1);
+    else
+        heca_cmd_err("Mode should only have values master|client", NULL);
+    if (heca.hspace_id == (uint8_t) -1) /* Validate parameters */
+        heca_cmd_err("hspaceid is a mandatory opt for -heca parameter", NULL);
+}
+
+void heca_check_params(void)
+{
+    if (heca.is_master)
+        if (heca.mr_count == 0 || heca.hproc_count == 0)
+            heca_cmd_err("hmrs and hprocs must be specified for master!", NULL);
+}
+
+/* Check MRs' memory overlapping
+   Check if overall MRs' size exceed vmmem*/
+void heca_check_mrs(uint64_t ram_size)
+{
+    int i, j;
+    size_t starti, endi, startj, endj, allmem = 0;
+
+    for (i=0; i < heca.mr_count; i++) {
+        starti = (size_t) heca.mr_array[i].addr;
+        endi = (size_t)heca.mr_array[i].addr + heca.mr_array[i].sz - 1;
+        for (j=i+1; j < heca.mr_count; j++) {
+            startj = (size_t)heca.mr_array[j].addr;
+            endj = (size_t)heca.mr_array[j].addr + heca.mr_array[j].sz - 1;
+            if (endi >= startj && starti <= endj)
+                heca_cmd_err("hmr virtual addresses overlap", NULL);
+        }
+        allmem+=heca.mr_array[i].sz;
     }
-    /* Validate parameters */
-    if (heca.hspace_id == (uint8_t) -1) {
-        fprintf(stderr, "[HECA] hspaceid is a mandatory option for -heca\n");
-        exit(1);
-    }
+    if (allmem > ram_size)
+        heca_cmd_err("overall hmr sizes exceed machine memory", NULL);
+}
+
+void heca_cmd_err(const char* msg, int* param)
+{
+    if (param == NULL)
+        fprintf(stderr, "[HECA ERROR]: %s\n", msg);
+    else
+        fprintf(stderr, "[HECA ERROR]: %s%d\n", msg, *param);
+    exit(1);
 }
 
 void heca_migrate_dest_init(const char* dest_ip, const char* source_ip)

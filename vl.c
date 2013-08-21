@@ -517,6 +517,10 @@ static QemuOptsList qemu_heca_opts = {
             .name = "port",
             .type = QEMU_OPT_NUMBER,
             .help = "Master machine port. Available only if client mode is selected",
+        },{
+            .name = "tcp_port",
+            .type = QEMU_OPT_NUMBER,
+            .help = "Tcp machine port. Available only if client mode is selected",
         },
         { /* End of the list */ }
     },
@@ -539,6 +543,10 @@ static QemuOptsList qemu_hecaproc_opts = {
             .name = "port",
             .type = QEMU_OPT_NUMBER,
             .help = "heca_process port",
+        },{
+            .name = "tcp_port",
+            .type = QEMU_OPT_NUMBER,
+            .help = "heca_process tcp port",
         },
         { /* End of the list */ }
     },
@@ -3902,6 +3910,9 @@ int main(int argc, char **argv, char **envp)
         }
     }
     loc_set_none();
+    
+    heca_check_params();
+    heca_check_mrs(ram_size);
 
     if (qemu_init_main_loop()) {
         fprintf(stderr, "qemu_init_main_loop failed\n");
