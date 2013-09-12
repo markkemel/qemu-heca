@@ -2793,7 +2793,8 @@ Prepare for incoming migration, listen on @var{port}.
 ETEXI
 
 DEF("heca", HAS_ARG, QEMU_OPTION_heca,
-    "-heca [hspaceid=value][,mode=master|client[,hprocid=id][,masterip=ip][,port=port][,tcp_port=port]]\n" \
+    "-heca [hspaceid=value][,mode=master|slave[,hprocid=id][,masterip=ip]"
+    "[,rdma_port=port][,mng_port=port]]\n" \
     "           Setup heca memory share feature.\n",
     QEMU_ARCH_ALL)
 STEXI
@@ -2802,8 +2803,9 @@ STEXI
 ETEXI
 
 DEF("hecaproc", HAS_ARG, QEMU_OPTION_hecaproc,
-    "-hecaproc [hprocid=id][,ip=ip][,port=port][,tcp_port=port]\n" \
-    "           Define heca_process information. Has to follow '-heca mode=master' parameter.\n",
+    "-hecaproc [hprocid=id][,ip=ip][,rdma_port=port][,mng_port=port]\n" \
+    "           Define heca_process information. Has to follow "
+    "'-heca mode=master' parameter.\n",
     QEMU_ARCH_ALL)
 STEXI
 @item -hecaproc
@@ -2812,7 +2814,8 @@ ETEXI
 
 DEF("hecamr", HAS_ARG, QEMU_OPTION_hecamr,
     "-hecamr [start=value][,size=value][,hprocids=id[:id[:...]]]\n" \
-    "           Define heca_memory_region information. Has to follow -heca mode=master parameter.\n",
+    "           Define heca_memory_region information." 
+    "Has to follow -heca mode=master parameter.\n",
     QEMU_ARCH_ALL)
 STEXI
 @item -hecamr

@@ -512,15 +512,15 @@ static QemuOptsList qemu_heca_opts = {
         },{
             .name = "masterip",
             .type = QEMU_OPT_STRING,
-            .help = "IP address of the master machine, available only if mode=client",
+            .help = "IP address of the master, available only if mode=client",
         },{
-            .name = "port",
+            .name = "rdma_port",
             .type = QEMU_OPT_NUMBER,
-            .help = "Master machine port. Available only if client mode is selected",
+            .help = "RDMA port. Available only if slave mode is selected",
         },{
-            .name = "tcp_port",
+            .name = "mng_port",
             .type = QEMU_OPT_NUMBER,
-            .help = "Tcp machine port. Available only if client mode is selected",
+            .help = "Mng port. Available only if slave mode is selected",
         },
         { /* End of the list */ }
     },
@@ -540,13 +540,13 @@ static QemuOptsList qemu_hecaproc_opts = {
             .type = QEMU_OPT_STRING,
             .help = "heca_process IP address",
         },{
-            .name = "port",
+            .name = "rdma_port",
             .type = QEMU_OPT_NUMBER,
-            .help = "heca_process port",
+            .help = "heca_process RDMA port",
         },{
-            .name = "tcp_port",
+            .name = "mng_port",
             .type = QEMU_OPT_NUMBER,
-            .help = "heca_process tcp port",
+            .help = "heca_process mng port",
         },
         { /* End of the list */ }
     },

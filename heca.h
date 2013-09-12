@@ -12,7 +12,7 @@
 #include <wordexp.h>
 #include "memory.h"
 
-void heca_cmd_client_init(QemuOpts *opts);
+void heca_cmd_slave_init(QemuOpts *opts);
 void hecamr_cmd_add(QemuOpts *opts);
 void hecaproc_cmd_add(QemuOpts *opts);
 void heca_cmd_init(QemuOpts *opts);
